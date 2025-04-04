@@ -1,0 +1,7 @@
+#!/bin/sh
+tmp="/tmp/aigvis$$"
+trap "rm -f $tmp.*" 2 6 11
+aigtodot $* > $tmp.dot || exit 1
+dot -Tpdf $tmp.dot > $tmp.pdf || exit 1
+evince $tmp.pdf
+rm -f $tmp.*

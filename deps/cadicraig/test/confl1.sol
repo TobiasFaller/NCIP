@@ -1,0 +1,4 @@
+s UNSATISFIABLE
+i CRAIG NORMAL
+i p cnf 5 1
+i -1 0

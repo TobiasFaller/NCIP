@@ -1,0 +1,27 @@
+name: Publish NCIP
+
+on:
+  push:
+    branches: [ "main" ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Build
+      run: |
+        cmake -B      ${{github.workspace}}/build -DCMAKE_BUILD_TYPE=RelWithDebInfo
+        cmake --build ${{github.workspace}}/build --parallel
+        cmake --install ${{github.workspace}}/build --prefix ${{github.workspace}}/artifact
+        tar -cvf ${{github.workspace}}/artifact.tar -C ${{github.workspace}}/artifact .
+
+    - name: Upload a Build Artifact
+      uses: actions/upload-artifact@v4.6.2
+      with:
+        name: NCIP
+        path: ${{github.workspace}}/artifact.tar
+        if-no-files-found: error
+        include-hidden-files: false
