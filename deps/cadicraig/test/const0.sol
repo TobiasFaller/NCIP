@@ -1,0 +1,4 @@
+s UNSATISFIABLE
+i CRAIG ZERO
+i p cnf 1 1
+i 0

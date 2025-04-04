@@ -1,0 +1,28 @@
+[submodule "deps/aiger"]
+	path = deps/aiger
+	url = git@github.com:arminbiere/aiger.git
+	branch = master
+[submodule "deps/minicraig"]
+	path = deps/minicraig
+	url = git@gitlab.tf.uni-freiburg.de:solver/sat-solver/mini-craig.git
+	branch = main
+[submodule "deps/minisat"]
+	path = deps/minisat
+	url = git@gitlab.tf.uni-freiburg.de:solver/sat-solver/minisat-2.2.0.git
+	branch = main
+[submodule "deps/cadical"]
+	path = deps/cadical
+	url = git@gitlab.tf.uni-freiburg.de:solver/sat-solver/cadical.git
+	branch = main
+[submodule "deps/kittencraig"]
+	path = deps/kittencraig
+	url = git@gitlab.tf.uni-freiburg.de:solver/sat-solver/kittencraig.git
+	branch = main
+[submodule "deps/kissat"]
+	path = deps/kissat
+	url = git@gitlab.tf.uni-freiburg.de:solver/sat-solver/kittenaslibrary.git
+	branch = main
+[submodule "deps/cadicraig"]
+	path = deps/cadicraig
+	url = git@gitlab.tf.uni-freiburg.de:solver/sat-solver/cadicraig.git
+	branch = main

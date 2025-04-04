@@ -1,0 +1,6 @@
+c --lrat=1
+c --lratcraig=1
+p craigcnf 1 2
+g 1
+A 1 0
+B -1 0
