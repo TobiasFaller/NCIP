@@ -6,100 +6,141 @@
 #include <iostream>
 #include <fstream>
 #include <sstream>
-#include <regex>
 #include <csignal>
 #include <functional>
 #include <tuple>
 #include <memory>
 #include <variant>
 
-#include <aiger.h>
-
-#include "bmc-format-aig.hpp"
-#include "bmc-format-cip.hpp"
-#include "bmc-format-dimspec.hpp"
+#include "bmc-io-aig.hpp"
+#include "bmc-io-cip.hpp"
+#include "bmc-io-dimspec.hpp"
 #include "bmc-problem.hpp"
 #include "bmc-ncip.hpp"
 #include "bmc-ncip-portfolio.hpp"
 
 #if defined(NCIP_SOLVER_MINICRAIG)
-	using BmcSolver = Ncip::MiniCraigBmcSolver;
+	static auto CreateSolver(Ncip::BmcProblem problem, Ncip::BmcConfiguration configuration) -> auto {
+		return Ncip::MiniCraigBmcSolver(problem, configuration);
+	}
 #elif defined(NCIP_SOLVER_MINICRAIG_DEBUG)
-	using BmcSolver = Ncip::MiniCraigDebugBmcSolver;
+	static auto CreateSolver(Ncip::BmcProblem problem, Ncip::BmcConfiguration configuration) -> auto {
+		return Ncip::MiniCraigDebugBmcSolver(problem, configuration);
+	}
 #elif defined(NCIP_SOLVER_CADICRAIG)
-	using BmcSolver = Ncip::CadiCraigBmcSolver;
+	static auto CreateSolver(Ncip::BmcProblem problem, Ncip::BmcConfiguration configuration) -> auto {
+		return Ncip::CadiCraigBmcSolver(problem, configuration);
+	}
 #elif defined(NCIP_SOLVER_CADICRAIG_DEBUG)
-	using BmcSolver = Ncip::CadiCraigDebugBmcSolver;
+	static auto CreateSolver(Ncip::BmcProblem problem, Ncip::BmcConfiguration configuration) -> auto {
+		return Ncip::CadiCraigDebugBmcSolver(problem, configuration);
+	}
 #elif defined(NCIP_SOLVER_KITTENCRAIG)
-	using BmcSolver = Ncip::KittenCraigBmcSolver;
+	static auto CreateSolver(Ncip::BmcProblem problem, Ncip::BmcConfiguration configuration) -> auto {
+		return Ncip::KittenCraigBmcSolver(problem, configuration);
+	}
 #elif defined(NCIP_SOLVER_PORTFOLIO)
-	template<typename Solver>
-	static Solver ConstructSolverForPortfilio(const Ncip::BmcProblem& problem, Ncip::BmcConfiguration configuration) {
-		if constexpr (std::is_same_v<Solver, Ncip::CadiCraigBmcSolver> || std::is_same_v<Solver, Ncip::KittenCraigBmcSolver>) {
-			configuration.SetPreprocessCraig(Ncip::PreprocessLevel::None);
-			configuration.SetPreprocessInit(Ncip::PreprocessLevel::None);
-			configuration.SetPreprocessTrans(Ncip::PreprocessLevel::None);
-			configuration.SetPreprocessTarget(Ncip::PreprocessLevel::None);
+	#ifdef NCIP_BACKEND_MINICRAIG
+		static auto CreateMiniCraig(const Ncip::BmcProblem& problem, Ncip::BmcConfiguration configuration, Ncip::PreprocessLevel preprocessing, bool craig) -> auto {
+			configuration.SetEnableCraigInterpolation(craig);
+			configuration.SetPreprocessInit(preprocessing);
+			configuration.SetPreprocessTrans(preprocessing);
+			configuration.SetPreprocessTarget(preprocessing);
+			configuration.SetPreprocessCraig((preprocessing >= Ncip::PreprocessLevel::Simple)
+				? Ncip::PreprocessLevel::Simple : Ncip::PreprocessLevel::None);
+			return Ncip::MiniCraigBmcSolver(problem, configuration);
 		}
-		return Solver(problem, configuration);
-	};
+	#endif
 
-	template<typename V, typename... Solvers>
-	class MakePortfolioBmcSolver:
-		public Ncip::PortfolioBmcSolver<Solvers...> {
-	public:
-		MakePortfolioBmcSolver(Ncip::BmcProblem problem, Ncip::BmcConfiguration configuration):
-			Ncip::PortfolioBmcSolver<Solvers...>(ConstructSolverForPortfilio<Solvers>(problem, configuration)...)
-		{}
-	};
+	#ifdef NCIP_BACKEND_CADICRAIG
+		static auto CreateCadiCraig(const Ncip::BmcProblem& problem, Ncip::BmcConfiguration configuration, Ncip::PreprocessLevel preprocessing, bool craig) -> auto {
+			configuration.SetEnableCraigInterpolation(craig);
+			configuration.SetPreprocessInit(preprocessing);
+			configuration.SetPreprocessTrans(preprocessing);
+			configuration.SetPreprocessTarget(preprocessing);
+			configuration.SetPreprocessCraig((preprocessing >= Ncip::PreprocessLevel::Simple)
+				? Ncip::PreprocessLevel::Simple : Ncip::PreprocessLevel::None);
+			return Ncip::CadiCraigBmcSolver(problem, configuration);
+		}
+	#endif
 
-	using BmcSolver = MakePortfolioBmcSolver<
-		void
-		#ifdef NCIP_BACKEND_MINICRAIG
-			, Ncip::MiniCraigBmcSolver
-		#endif
-		#ifdef NCIP_BACKEND_CADICRAIG
-			, Ncip::CadiCraigBmcSolver
-		#endif
-		#ifdef NCIP_BACKEND_KITTENCRAIG
-			, Ncip::KittenCraigBmcSolver
-		#endif
-	>;
+	#ifdef NCIP_BACKEND_KITTENCRAIG
+		static auto CreateKittenCraig(const Ncip::BmcProblem& problem, Ncip::BmcConfiguration configuration, Ncip::PreprocessLevel preprocessing, bool craig) -> auto {
+			configuration.SetEnableCraigInterpolation(craig);
+			configuration.SetPreprocessInit(preprocessing);
+			configuration.SetPreprocessTrans(preprocessing);
+			configuration.SetPreprocessTarget(preprocessing);
+			configuration.SetPreprocessCraig((preprocessing >= Ncip::PreprocessLevel::Simple)
+				? Ncip::PreprocessLevel::Simple : Ncip::PreprocessLevel::None);
+			return Ncip::KittenCraigBmcSolver(problem, configuration);
+		}
+	#endif
+
+	template<typename... Solver>
+	static auto CreatePortfolioSolver(bool ignored, Solver... solver) -> auto {
+		return Ncip::PortfolioBmcSolver(std::move(solver)...);
+	}
+	static auto CreateSolver(Ncip::BmcProblem problem, Ncip::BmcConfiguration configuration) -> auto {
+		return CreatePortfolioSolver(
+			false // Ignore me
+			#ifdef NCIP_BACKEND_MINICRAIG
+				, CreateMiniCraig(problem, configuration, Ncip::PreprocessLevel::None, true)
+				, CreateMiniCraig(problem, configuration, Ncip::PreprocessLevel::Simple, true)
+				, CreateMiniCraig(problem, configuration, Ncip::PreprocessLevel::Expensive, true)
+				, CreateMiniCraig(problem, configuration, Ncip::PreprocessLevel::None, false)
+				, CreateMiniCraig(problem, configuration, Ncip::PreprocessLevel::Simple, false)
+				, CreateMiniCraig(problem, configuration, Ncip::PreprocessLevel::Expensive, false)
+			#endif
+			#ifdef NCIP_BACKEND_CADICRAIG
+				, CreateCadiCraig(problem, configuration, Ncip::PreprocessLevel::None, true)
+				, CreateCadiCraig(problem, configuration, Ncip::PreprocessLevel::Simple, true)
+				, CreateCadiCraig(problem, configuration, Ncip::PreprocessLevel::Expensive, true)
+				, CreateCadiCraig(problem, configuration, Ncip::PreprocessLevel::None, false)
+				, CreateCadiCraig(problem, configuration, Ncip::PreprocessLevel::Simple, false)
+				, CreateCadiCraig(problem, configuration, Ncip::PreprocessLevel::Expensive, false)
+			#endif
+			#ifdef NCIP_BACKEND_KITTENCRAIG
+				, CreateKittenCraig(problem, configuration, Ncip::PreprocessLevel::None, true)
+				, CreateKittenCraig(problem, configuration, Ncip::PreprocessLevel::Simple, true)
+				, CreateKittenCraig(problem, configuration, Ncip::PreprocessLevel::Expensive, true)
+				, CreateKittenCraig(problem, configuration, Ncip::PreprocessLevel::None, false)
+				, CreateKittenCraig(problem, configuration, Ncip::PreprocessLevel::Simple, false)
+				, CreateKittenCraig(problem, configuration, Ncip::PreprocessLevel::Expensive, false)
+			#endif
+		);
+	}
 #else
 	#error "No backend selected"
 #endif
 
-inline std::string trim(const std::string &s) {
-   auto wsfront = std::find_if_not(s.begin(), s.end(), [](int c){ return std::isspace(c); });
-   auto wsback = std::find_if_not(s.rbegin(), s.rend(), [](int c){ return std::isspace(c); }).base();
-   return (wsback <= wsfront ? std::string() : std::string(wsfront, wsback));
-}
-
-enum class InputFormat {
-	NONE,
-	CIP,
-	AIGER,
-	DIMSPEC
-};
-using Problem = std::variant<Ncip::CipProblem, Ncip::AigProblem, Ncip::DimspecProblem>;
-
 template<class... Ts> struct overload : Ts... { using Ts::operator()...; };
 template<class... Ts> overload(Ts...) -> overload<Ts...>; // line not needed in C++20...
 
-static std::tuple<Ncip::AigProblem, Ncip::BmcProblem> ParseAigerProblem(std::istream& input);
-static void ExportAigerProblem(std::ostream& output, const Ncip::AigProblem& problem);
-static void ExportAigerModel(std::ostream& output, const Ncip::AigProblem& problem, const Ncip::BmcModel& model);
-static void ExportAigerCertificate(std::ostream& output, const Ncip::AigProblem& problem, const Ncip::BmcCertificate& certificate);
+auto const constexpr catch_io = []<typename... T>(auto func) -> auto {
+	return [func](T... params) -> auto {
+		try {
+			if constexpr (std::is_void_v<std::invoke_result_t<decltype(func), T...>>) {
+				func(params...);
+			} else {
+				return func(params...);
+			}
+		} catch (const std::bad_alloc& exception) {
+			std::cerr << "Error: Out of Memory" << std::endl;
+			exit(3);
+		} catch (const Ncip::CipIoException& exception) {
+			std::cerr << "Error: CIP I/O exception: " << exception.what() << std::endl;
+			exit(3);
+		} catch (const Ncip::AigerIoException& exception) {
+			std::cerr << "Error: AIGER I/O exception: " << exception.what() << std::endl;
+			exit(3);
+		} catch (const Ncip::DimspecIoException& exception) {
+			std::cerr << "Error: DIMSPEC I/O exception: " << exception.what() << std::endl;
+			exit(3);
+		}
+	};
+};
 
-static std::tuple<Ncip::CipProblem, Ncip::BmcProblem> ParseCipProblem(std::istream& input);
-static void ExportCipProblem(std::ostream& output, const Ncip::CipProblem& problem);
-static void ExportCipModel(std::ostream& output, const Ncip::CipProblem& problem, const Ncip::BmcModel& model);
-static void ExportCipCertificate(std::ostream& output, const Ncip::CipProblem& problem, const Ncip::BmcCertificate& certificate);
-
-static std::tuple<Ncip::DimspecProblem, Ncip::BmcProblem> ParseDimspecProblem(std::istream& input);
-static void ExportDimspecProblem(std::ostream& output, const Ncip::DimspecProblem& problem);
-static void ExportDimspecModel(std::ostream& output, const Ncip::DimspecProblem& problem, const Ncip::BmcModel& model);
-static void ExportDimspecCertificate(std::ostream& output, const Ncip::DimspecProblem& problem, const Ncip::BmcCertificate& certificate);
+enum class InputFormat { NONE, CIP, AIGER, DIMSPEC };
 
 void usage() {
 	std::cerr << "Usage: ncip [options] <input-file> (<output-file>)" << std::endl;
@@ -162,25 +203,10 @@ int main(int argc, char** argv) {
 	bmcConfiguration.SetEnableCraigInterpolation(true);
 	bmcConfiguration.SetEnableFixPointCheck(true);
 	bmcConfiguration.SetEnableSanityChecks(true);
-
-#if defined(NCIP_SOLVER_MINICRAIG) || defined(NCIP_SOLVER_MINICRAIG_DEBUG)
+	bmcConfiguration.SetPreprocessInit(Ncip::PreprocessLevel::Expensive);
+	bmcConfiguration.SetPreprocessTrans(Ncip::PreprocessLevel::Expensive);
+	bmcConfiguration.SetPreprocessTarget(Ncip::PreprocessLevel::Expensive);
 	bmcConfiguration.SetPreprocessCraig(Ncip::PreprocessLevel::Simple);
-	bmcConfiguration.SetPreprocessInit(Ncip::PreprocessLevel::Simple);
-	bmcConfiguration.SetPreprocessTrans(Ncip::PreprocessLevel::Simple);
-	bmcConfiguration.SetPreprocessTarget(Ncip::PreprocessLevel::Simple);
-#elif defined(NCIP_SOLVER_CADICRAIG) || defined(NCIP_SOLVER_CADICRAIG_DEBUG) \
-		|| defined(NCIP_SOLVER_KITTENCRAIG)
-	bmcConfiguration.SetPreprocessCraig(Ncip::PreprocessLevel::None);
-	bmcConfiguration.SetPreprocessInit(Ncip::PreprocessLevel::None);
-	bmcConfiguration.SetPreprocessTrans(Ncip::PreprocessLevel::None);
-	bmcConfiguration.SetPreprocessTarget(Ncip::PreprocessLevel::None);
-#elif defined(NCIP_SOLVER_PORTFOLIO)
-	// Maximum optimization settings for portfolio approach
-	bmcConfiguration.SetPreprocessCraig(Ncip::PreprocessLevel::Simple);
-	bmcConfiguration.SetPreprocessInit(Ncip::PreprocessLevel::Simple);
-	bmcConfiguration.SetPreprocessTrans(Ncip::PreprocessLevel::Simple);
-	bmcConfiguration.SetPreprocessTarget(Ncip::PreprocessLevel::Simple);
-#endif
 
 	std::vector<std::string> freeArguments;
 	InputFormat format { InputFormat::NONE };
@@ -425,54 +451,91 @@ int main(int argc, char** argv) {
 
 	std::ifstream inputFStream;
 	std::ofstream outputFStream;
-	if (inputFile != "-") {
-		inputFStream = std::ifstream { inputFile };
-		if (!inputFStream.good()) {
-			std::cerr << "Error: Input file \"" << inputFile << "\" was not found" << std::endl;
-			exit(2);
-		}
-	}
-	if (outputFile != "-" && outputFile != "") {
-		outputFStream = std::ofstream { outputFile };
-		if (!outputFStream.good()) {
-			std::cerr << "Error: Output file \"" << outputFile << "\" could not be created" << std::endl;
-			exit(2);
-		}
-	} else if (outputFile == "") {
-		// In case of outputFile is an empty string we are writing into a dummy stream.
-		// Nothing to do here as the default ofstream object behaves as needed.
-	}
+	std::stringstream outputSStream { std::ios_base::out };
 
-	std::istream& input { (inputFile == "-") ? std::cin : inputFStream };
-	std::ostream& output { (outputFile == "-") ? std::cout : outputFStream };
+	std::istream& input {
+		[&](const std::string& path) -> std::istream& {
+			if (path == "-") {
+				return std::cin;
+			} else if (path.empty()) {
+				std::cerr << "Error: Input file name is empty" << std::endl;
+				exit(2);
+			} else {
+				inputFStream = std::ifstream { path };
+				if (!inputFStream.good()) {
+					std::cerr << "Error: Input file \"" << inputFile << "\" was not found" << std::endl;
+					exit(2);
+				}
+				return inputFStream;
+			}
+		}(inputFile)
+	};
+	std::ostream& output {
+		[&](const std::string& path) -> std::ostream& {
+			if (path == "-") {
+				return std::cout;
+			} else if (path.empty()) {
+				// In case of outputFile is an empty string we are writing into a dummy stream.
+				return outputSStream;
+			} else {
+				outputFStream = std::ofstream { outputFile };
+				if (!outputFStream.good()) {
+					std::cerr << "Error: Output file \"" << outputFile << "\" could not be created" << std::endl;
+					exit(2);
+				}
+				return outputFStream;
+			}
+		}(outputFile)
+	};
 
-	auto const parse_problem = [&format](auto& input) -> std::tuple<Problem, Ncip::BmcProblem> {
-		if (format == InputFormat::CIP) { auto [problem, bmcProblem] = ParseCipProblem(input); return { problem, bmcProblem }; }
-		if (format == InputFormat::AIGER) { auto [problem, bmcProblem] = ParseAigerProblem(input); return { problem, bmcProblem }; }
-		if (format == InputFormat::DIMSPEC) { auto [problem, bmcProblem] = ParseDimspecProblem(input); return { problem, bmcProblem }; }
-		__builtin_unreachable();
-	};
-	auto const export_problem = [](auto& output, auto& problem) {
-		std::visit(overload {
-			[&](const Ncip::CipProblem& problem) { ExportCipProblem(output, problem); },
-			[&](const Ncip::AigProblem& problem) { ExportAigerProblem(output, problem); },
-			[&](const Ncip::DimspecProblem& problem) { ExportDimspecProblem(output, problem); },
-		}, problem);
-	};
-	auto const export_model = [](auto& output, auto& problem, auto& model) {
-		std::visit(overload {
-			[&](const Ncip::CipProblem& problem) { ExportCipModel(output, problem, model); },
-			[&](const Ncip::AigProblem& problem) { ExportAigerModel(output, problem, model); },
-			[&](const Ncip::DimspecProblem& problem) { ExportDimspecModel(output, problem, model); },
-		}, problem);
-	};
-	auto const export_certificate = [](auto& output, auto& problem, auto& certificate) {
-		std::visit(overload {
-			[&](const Ncip::CipProblem& problem) { ExportCipCertificate(output, problem, certificate); },
-			[&](const Ncip::AigProblem& problem) { ExportAigerCertificate(output, problem, certificate); },
-			[&](const Ncip::DimspecProblem& problem) { ExportDimspecCertificate(output, problem, certificate); },
-		}, problem);
-	};
+	using Problem = std::variant<Ncip::CipProblem, Ncip::AigProblem, Ncip::DimspecProblem>;
+	auto parse_problem = catch_io.operator()<std::istream&>(
+		[&format](auto& input) -> std::tuple<Problem, Ncip::BmcProblem> {
+			if (format == InputFormat::CIP) {
+				std::cerr << "Parsing input as CIP format" << std::endl;
+				auto [problem, bmcProblem] = Ncip::ParseCipProblem(input);
+				return { problem, bmcProblem };
+			}
+			if (format == InputFormat::AIGER) {
+				std::cerr << "Parsing input as AIGER format" << std::endl;
+				auto [problem, bmcProblem] = Ncip::ParseAigerProblem(input);
+				return { problem, bmcProblem };
+			}
+			if (format == InputFormat::DIMSPEC) {
+				std::cerr << "Parsing input as DIMSPEC format" << std::endl;
+				auto [problem, bmcProblem] = Ncip::ParseDimspecProblem(input);
+				return { problem, bmcProblem };
+			}
+			__builtin_unreachable();
+		}
+	);
+	auto const export_problem = catch_io.operator()<std::ostream&, Problem const&>(
+		[](auto& output, auto& problem) -> void {
+			std::visit(overload {
+				[&](const Ncip::CipProblem& problem) { Ncip::ExportCipProblem(output, problem); },
+				[&](const Ncip::AigProblem& problem) { Ncip::ExportAigerProblem(output, problem); },
+				[&](const Ncip::DimspecProblem& problem) { Ncip::ExportDimspecProblem(output, problem); },
+			}, problem);
+		}
+	);
+	auto const export_model = catch_io.operator()<std::ostream&, Problem const&, Ncip::BmcModel const&>(
+		[](auto& output, auto& problem, auto& model) -> void {
+			std::visit(overload {
+				[&](const Ncip::CipProblem& problem) { Ncip::ExportCipModel(output, problem, model); },
+				[&](const Ncip::AigProblem& problem) { Ncip::ExportAigerModel(output, problem, model); },
+				[&](const Ncip::DimspecProblem& problem) { Ncip::ExportDimspecModel(output, problem, model); },
+			}, problem);
+		}
+	);
+	auto const export_certificate = catch_io.operator()<std::ostream&, Problem const&, Ncip::BmcCertificate const&>(
+		[](auto& output, auto& problem, auto& certificate) -> void {
+			std::visit(overload {
+				[&](const Ncip::CipProblem& problem) { Ncip::ExportCipCertificate(output, problem, certificate); },
+				[&](const Ncip::AigProblem& problem) { Ncip::ExportAigerCertificate(output, problem, certificate); },
+				[&](const Ncip::DimspecProblem& problem) { Ncip::ExportDimspecCertificate(output, problem, certificate); },
+			}, problem);
+		}
+	);
 	auto const export_options = [&](auto& output) {
 		for (int argi { 1 }; argi < argc; argi++) {
 			const std::string argument { argv[argi] };
@@ -506,7 +569,7 @@ int main(int argc, char** argv) {
 		exit(0);
 	}
 
-	BmcSolver solver { bmcProblem, bmcConfiguration };
+	auto solver { CreateSolver(bmcProblem, bmcConfiguration) };
 	std::cerr << "Solving BMC problem" << std::endl;
 
 	// Check for interrupt as the user might have sent
@@ -697,502 +760,4 @@ int main(int argc, char** argv) {
 			std::cerr << "Error: Please run a cpu and memory stress test to test for faults" << std::endl;
 			exit(2);
 	}
-}
-
-static int aig_generic_read(std::istream* state) {
-	return state->get();
-}
-
-static int aig_generic_write(char c, std::ostream* state) {
-	return (state->put(c).fail() ? EOF : 0);
-}
-
-static std::tuple<Ncip::AigProblem, Ncip::BmcProblem> ParseAigerProblem(std::istream& input) {
-	std::cerr << "Parsing input as Aiger format" << std::endl;
-
-	auto graph = aiger_init();
-	if (auto error = aiger_read_generic(graph, &input,
-			reinterpret_cast<aiger_get>(aig_generic_read)); error != nullptr) {
-		std::cerr << "Error: Could not read Aiger file: \"" << std::string(error) << "\"" << std::endl;
-		exit(2);
-	}
-	if (auto error = aiger_check(graph); error != nullptr) {
-		std::cerr << "Error: Aiger graph has invalid structure: \"" << std::string(error) << "\"" << std::endl;
-		exit(2);
-	}
-
-	Ncip::AigProblemBuilder builder;
-	for (ssize_t variable { 0 }; variable <= graph->maxvar; variable++) {
-		auto literal = variable * 2;
-		if (aiger_is_constant(literal)) {
-			continue; // Constant is already created by the builder
-		} else if (auto symbol = aiger_is_input(graph, literal); symbol != nullptr) {
-			builder.AddInput(symbol->lit);
-		} else if (auto symbol = aiger_is_latch(graph, literal); symbol != nullptr) {
-			builder.AddLatch(symbol->lit, symbol->next, symbol->reset);
-		} else if (auto symbol = aiger_is_and(graph, literal); symbol != nullptr) {
-			builder.AddAnd(symbol->lhs, symbol->rhs0, symbol->rhs1);
-		}
-	}
-	// The outputs are not really used but we declare them for the BMC anyway.
-	for (ssize_t index { 0 }; index < graph->num_outputs; index++) {
-		builder.AddOutput(graph->outputs[index].lit);
-	}
-	for (ssize_t index { 0 }; index < graph->num_bad; index++) {
-		builder.AddBad(graph->bad[index].lit);
-	}
-	for (ssize_t index { 0 }; index < graph->num_constraints; index++) {
-		builder.AddConstraint(graph->constraints[index].lit);
-	}
-	aiger_reset(graph);
-
-	try {
-		return builder.Build();
-	} catch (const Ncip::AigProblemException& error) {
-		std::cerr << "Error: Found invalid AIGER problem: " << error.what() << std::endl;
-		exit(3);
-	}
-}
-
-static void ExportAigerProblem(std::ostream& output, const Ncip::AigProblem& problem) {
-	std::cerr << "Exporting output as Aiger format" << std::endl;
-
-	auto graph = aiger_init();
-	for (auto& node : problem.GetNodes()) {
-		if (node.type == Ncip::AigNodeType::Input) {
-			aiger_add_input(graph, node.nodeId, nullptr);
-		} else if (node.type == Ncip::AigNodeType::Latch) {
-			aiger_add_latch(graph, node.nodeId, node.leftEdgeId, nullptr);
-			aiger_add_reset(graph, node.nodeId, node.rightEdgeId);
-		} else if (node.type == Ncip::AigNodeType::And) {
-			aiger_add_and(graph, node.nodeId, node.leftEdgeId, node.rightEdgeId);
-		}
-	}
-	for (auto& output : problem.GetOutputs()) {
-		aiger_add_output(graph, output, nullptr);
-	}
-	for (auto& bad : problem.GetBads()) {
-		aiger_add_bad(graph, bad, nullptr);
-	}
-	for (auto& constraint : problem.GetConstraints()) {
-		aiger_add_constraint(graph, constraint, nullptr);
-	}
-
-	if (auto error = aiger_check(graph); error != nullptr) {
-		std::cerr << "Error: Aiger graph has invalid structure: \"" << std::string(error) << "\"" << std::endl;
-		exit(2);
-	}
-	if (!aiger_write_generic(graph, aiger_mode::aiger_ascii_mode, &output,
-			reinterpret_cast<aiger_put>(aig_generic_write))) {
-		std::cerr << "Error: Could not write Aiger file" << std::endl;
-		exit(2);
-	}
-
-	aiger_reset(graph);
-}
-
-static void ExportAigerModel(std::ostream& output, const Ncip::AigProblem& problem, const Ncip::BmcModel& model) {
-	// Use custom encoding here since X has to be transformed to x.
-	auto const to_aigsim = [] (auto const& result) {
-		switch (result) {
-			case Ncip::BmcAssignment::Positive: return "1"; break;
-			case Ncip::BmcAssignment::Negative: return "0"; break;
-			case Ncip::BmcAssignment::DontCare: return "x"; break;
-			default: __builtin_unreachable();
-		}
-	};
-
-	auto const& bads = (problem.GetBadCount() > 0u)
-		? problem.GetBads()
-		: problem.GetOutputs();
-
-	// Header
-	output << "1" << std::endl;
-	for (size_t bad { 0u }; bad < bads.size(); bad++) {
-		bool satisfied = false;
-		for (size_t depth { 0u }; depth < model.GetTimeframes().size(); depth++) {
-			auto result { model.GetTimeframe(depth)[bads[bad] / 2u] };
-			satisfied |= ((result ^ (bads[bad] & 1u)) == Ncip::BmcAssignment::Positive);
-			if (satisfied) { break; }
-		}
-		if (satisfied) { output << "b" << bad; }
-	}
-	output << std::endl;
-
-	// Initial state
-	for (size_t index { 0u }; index < problem.GetLatchCount(); index++) {
-		auto result { model.GetTimeframe(0)[problem.GetLatches()[index] / 2] };
-		output << to_aigsim(result);
-	}
-	output << std::endl;
-
-	// Input vectors
-	for (size_t depth { 0u }; depth < model.GetTimeframes().size(); depth++) {
-		for (size_t index { 0u }; index < problem.GetInputCount(); index++) {
-			auto result { model.GetTimeframe(depth)[problem.GetInputs()[index] / 2] };
-			output << to_aigsim(result);
-		}
-		output << std::endl;
-	}
-	output << "." << std::endl;
-}
-
-static void ExportAigerCertificate(std::ostream& output, const Ncip::AigProblem& problem, const Ncip::BmcCertificate& certificate) {
-	Ncip::AigCertificateBuilder builder;
-	ExportAigerProblem(output, builder.Build(problem, certificate));
-}
-
-static std::tuple<Ncip::CipProblem, Ncip::BmcProblem> ParseCipProblem(std::istream& input) {
-	const std::regex innerGroups { "\\((.*)\\)" };
-	const std::regex specificGroups { "(-?[0-9]+:[0-9]+)" };
-
-	std::cerr << "Parsing input as CIP format" << std::endl;
-
-	Ncip::CipProblemBuilder builder { };
-	auto parse_clause = [&](const std::string& line) -> Ncip::BmcClause {
-		Ncip::BmcClause clause { };
-
-		std::smatch match;
-		if (!std::regex_match(line, match, innerGroups)) {
-			std::cerr << "Error: Could not parse line \"" << line << "\"" << std::endl;
-			exit(2);
-		}
-
-		std::string fullClause = match[1].str();
-		for (auto it = std::sregex_iterator(fullClause.begin(), fullClause.end(), specificGroups);
-			it != std::sregex_iterator(); it++)
-		{
-			int literalId;
-			int timeframe;
-			match = *it;
-			std::stringstream stream(match.str(0));
-			std::string token;
-
-			std::getline(stream, token, ':');
-			literalId = std::stol(token);
-
-			std::getline(stream, token, ':');
-			timeframe = std::stol(token);
-
-			clause.push_back(Ncip::BmcLiteral::FromVariable(std::abs(literalId) - 1u, (literalId < 0), timeframe));
-		}
-
-		return clause;
-	};
-
-	std::string line;
-	while (input.good() && !input.eof()) {
-		std::getline(input, line);
-		line = trim(line);
-		if (line.empty()) {
-			continue;
-		}
-
-		if (line.rfind("DECL", 0u) == 0u) {
-			std::cerr << "Parsing Variable Declarations" << std::endl;
-
-			while(input.good() && !input.eof()) {
-				std::getline(input, line);
-				line = trim(line);
-				if (line.empty()) {
-					break;
-				}
-
-				std::string variableType;
-				size_t variableIndex;
-
-				std::stringstream stream(line);
-				stream >> variableType;
-				stream >> variableIndex;
-
-				Ncip::BmcVariableId variableId;
-				if (variableType == "AND_VAR"
-					|| variableType == "AUX_VAR") {
-					variableId = builder.AddVariable(Ncip::CipVariableType::Tseitin);
-				} else if (variableType == "LATCH_VAR") {
-					variableId = builder.AddVariable(Ncip::CipVariableType::Latch);
-				} else if (variableType == "INPUT_VAR") {
-					variableId = builder.AddVariable(Ncip::CipVariableType::Input);
-				} else if (variableType == "OUTPUT_VAR") {
-					variableId = builder.AddVariable(Ncip::CipVariableType::Output);
-				} else {
-					std::cerr << "Error: Unknown variable type \"" << variableType << "\"" << std::endl;
-					exit(2);
-				}
-
-				if (variableId + 1u != variableIndex) {
-					std::cerr << "Error: Inconsistent literal index counters!" << std::endl;
-					exit(2);
-				}
-			}
-		} else if (line.rfind("INIT", 0u) == 0u) {
-			std::cerr << "Parsing Initial Clauses" << std::endl;
-
-			while(input.good() && !input.eof()) {
-				std::getline(input, line);
-				line = trim(line);
-				if (line.empty()) {
-					break;
-				}
-
-				auto clause = parse_clause(line);
-				builder.AddClause(Ncip::CipClauseType::Initial, clause);
-			}
-		} else if (line.rfind("TRANS", 0u) == 0u) {
-			std::cerr << "Parsing Transition Clauses" << std::endl;
-
-			while(input.good() && !input.eof()) {
-				std::getline(input, line);
-				line = trim(line);
-				if (line.empty()) {
-					break;
-				}
-
-				auto clause = parse_clause(line);
-				builder.AddClause(Ncip::CipClauseType::Transition, clause);
-			}
-		} else if (line.rfind("TARGET", 0u) == 0u) {
-			std::cerr << "Parsing Target Clauses" << std::endl;
-
-			while(input.good() && !input.eof()) {
-				std::getline(input, line);
-				line = trim(line);
-				if (line.empty()) {
-					break;
-				}
-
-				auto clause = parse_clause(line);
-				builder.AddClause(Ncip::CipClauseType::Target, clause);
-			}
-		} else if (line.rfind("--", 0u) == 0u) {
-			// Ignore comment lines
-			continue;
-		} else if (line.rfind("OFFSET: ", 0u) == 0u
-			|| line.rfind("USE_PROPERTY: ", 0u) == 0u
-			|| line.rfind("SIMPLIFY_INTERPOLANTS: ", 0u) == 0u
-			|| line.rfind("TIMEOUT: ", 0u) == 0u
-			|| line.rfind("MAXDEPTH: ", 0u) == 0u)
-		{
-			// Ignore unused property lines
-			std::cerr << "Warning: Ignoring property \"" << line << "\" from input file" << std::endl;
-			continue;
-		} else {
-			std::cerr << "Error: Unknown section \"" << line << "\"" << std::endl;
-			exit(2);
-		}
-	}
-
-	try {
-		return builder.Build();
-	} catch (const Ncip::CipProblemException& error) {
-		std::cerr << "Error: Found invalid CIP problem: " << error.what() << std::endl;
-		exit(3);
-	}
-}
-
-static void ExportCipProblem(std::ostream& output, const Ncip::CipProblem& problem) {
-	const auto print_clause = [&output](auto& clause) {
-		output << "(";
-		size_t index { 0u };
-		for (auto& literal : clause) {
-			if (index++ != 0) { output << ", "; }
-			output << "[" << (static_cast<ssize_t>(literal.GetVariable()) + 1) * (literal.IsNegated() ? -1 : 1)
-				<< ":" << literal.GetTimeframe() << "]";
-		}
-		output << ")" << std::endl;
-	};
-
-	output << "DECL" << std::endl;
-	size_t counter { 1 };
-	for (auto& var : problem.GetVariables()) {
-		switch (var) {
-			case Ncip::CipVariableType::Input: output << "INPUT_VAR " << counter++ << std::endl; break;
-			case Ncip::CipVariableType::Output: output << "OUTPUT_VAR " << counter++ << std::endl; break;
-			case Ncip::CipVariableType::Latch: output << "LATCH_VAR " << counter++ << std::endl; break;
-			case Ncip::CipVariableType::Tseitin: output << "AUX_VAR " << counter++ << std::endl; break;
-		}
-	}
-	output << std::endl;
-
-	output << "INIT" << std::endl;
-	for (auto& clause : problem.GetInit()) {
-		print_clause(clause);
-	}
-	output << std::endl;
-
-	output << "TRANS" << std::endl;
-	for (auto& clause : problem.GetTrans()) {
-		print_clause(clause);
-	}
-	output << std::endl;
-
-	output << "TARGET" << std::endl;
-	for (auto& clause : problem.GetTarget()) {
-		print_clause(clause);
-	}
-	output << std::endl;
-}
-
-static void ExportCipModel(std::ostream& output, const Ncip::CipProblem& problem, const Ncip::BmcModel& model) {
-	for (size_t depth { 0u }; depth < model.GetTimeframes().size(); depth++) {
-		output << depth << " = ";
-		for (auto& assignment : model.GetTimeframe(depth)) {
-			output << to_string(assignment);
-		}
-		output << std::endl;
-	}
-}
-
-static void ExportCipCertificate(std::ostream& output, const Ncip::CipProblem& problem, const Ncip::BmcCertificate& certificate) {
-	Ncip::CipCertificateBuilder builder;
-	ExportCipProblem(output, builder.Build(problem, certificate));
-}
-
-static std::tuple<Ncip::DimspecProblem, Ncip::BmcProblem> ParseDimspecProblem(std::istream& input) {
-	std::cerr << "Parsing input as DIMSPEC format" << std::endl;
-
-	Ncip::DimspecProblemBuilder builder { };
-	auto parse_clause = [&](const std::string& line, size_t variableCount) -> Ncip::BmcClause {
-		Ncip::BmcClause clause { };
-
-		ssize_t signedLiteral;
-		std::stringstream stream { line };
-		while (stream.good() && !stream.eof()) {
-			stream >> signedLiteral;
-			if (signedLiteral == 0) { break; }
-
-			size_t literal   { (std::abs(signedLiteral) - 1u) % variableCount };
-			size_t timeframe { (std::abs(signedLiteral) - 1u) / variableCount };
-			clause.push_back(Ncip::BmcLiteral::FromVariable(literal, signedLiteral < 0, timeframe));
-		}
-
-		return clause;
-	};
-
-	bool variablesDeclared = false;
-	std::string line;
-	while (input.good() && !input.eof()) {
-		std::getline(input, line);
-		line = trim(line);
-		if (line.empty()) {
-			continue;
-		} else if (line.rfind("c", 0u) == 0u) { // Ignore comments
-			continue;
-		} else if (line.rfind("u", 0u) == 0u
-				|| line.rfind("i", 0u) == 0u
-				|| line.rfind("g", 0u) == 0u
-				|| line.rfind("t", 0u) == 0u) {
-			Ncip::DimspecClauseType clauseType;
-			if (line.rfind("u", 0u) == 0u) {
-				std::cerr << "Parsing UNIVERSAL clauses" << std::endl;
-				clauseType = Ncip::DimspecClauseType::Universal;
-			} else if (line.rfind("i", 0u) == 0u) {
-				std::cerr << "Parsing INIT clauses" << std::endl;
-				clauseType = Ncip::DimspecClauseType::Initial;
-			} else if (line.rfind("g", 0u) == 0u) {
-				std::cerr << "Parsing GOAL clauses" << std::endl;
-				clauseType = Ncip::DimspecClauseType::Goal;
-			} else if (line.rfind("t", 0u) == 0u) {
-				std::cerr << "Parsing TRANS clauses" << std::endl;
-				clauseType = Ncip::DimspecClauseType::Transition;
-			}
-
-			std::stringstream stream(line);
-			std::string type, cnf;
-			size_t variables;
-			size_t clauses;
-			stream >> type;
-			stream >> cnf;
-			assert(cnf == "cnf");
-			stream >> variables;
-			stream >> clauses;
-
-			if (clauseType == Ncip::DimspecClauseType::Transition) {
-				variables /= 2u;
-			}
-			if (variablesDeclared && builder.GetVariables() != variables) {
-				std::cerr << "Error: Variable count of " << variables << " doesn't match previous declared "
-					<< builder.GetVariables() << " variables" << std::endl;
-				exit(2);
-			}
-			variablesDeclared = true;
-			builder.SetVariables(variables);
-
-			size_t clauseCounter{ 0u };
-			while(!input.eof() && input.good() && clauseCounter < clauses) {
-				std::getline(input, line);
-				line = trim(line);
-				if (line.empty()) {
-					continue;
-				}
-				if (line.rfind("c", 0u) == 0u) {
-					// Ignore comments
-					continue;
-				}
-
-				auto clause { parse_clause(line, variables) };
-				builder.AddClause(clauseType, clause);
-				clauseCounter++;
-			}
-		} else {
-			std::cerr << "Error: Unknown line \"" << line << "\"" << std::endl;
-			exit(2);
-		}
-	}
-
-	try {
-		return builder.Build();
-	} catch (const Ncip::DimspecProblemException& exception) {
-		std::cerr << "Error: Found invalid DIMSPEC problem: " << exception.what() << std::endl;
-		exit(3);
-	}
-}
-
-static void ExportDimspecProblem(std::ostream& output, const Ncip::DimspecProblem& problem) {
-	const auto print_clause = [&](auto& clause) {
-		size_t index { 0u };
-		for (auto& literal : clause) {
-			output << static_cast<ssize_t>(literal.GetVariable() + literal.GetTimeframe() * problem.GetVariables() + 1u)
-				* (literal.IsNegated() ? -1 : 1) << " ";
-		}
-		output << "0" << std::endl;
-	};
-
-	output << "u cnf " << problem.GetVariables() << " " << problem.GetUniversal().size() << std::endl;
-	for (auto& clause : problem.GetUniversal()) {
-		print_clause(clause);
-	}
-	output << "i cnf " << problem.GetVariables() << " " << problem.GetInit().size() << std::endl;
-	for (auto& clause : problem.GetInit()) {
-		print_clause(clause);
-	}
-	output << "g cnf " << problem.GetVariables() << " " << problem.GetGoal().size() << std::endl;
-	for (auto& clause : problem.GetGoal()) {
-		print_clause(clause);
-	}
-	output << "t cnf " << (2u * problem.GetVariables()) << " " << problem.GetTrans().size() << std::endl;
-	for (auto& clause : problem.GetTrans()) {
-		print_clause(clause);
-	}
-}
-
-static void ExportDimspecModel(std::ostream& output, const Ncip::DimspecProblem& problem, const Ncip::BmcModel& model) {
-	for (size_t depth { 0u }; depth < model.GetTimeframes().size(); depth++) {
-		output << "v" << depth;
-		auto const& timeframe { model.GetTimeframe(depth) };
-		for (size_t variable { 0u }; variable < timeframe.size(); variable++) {
-			switch (timeframe[variable]) {
-				case Ncip::BmcAssignment::DontCare: break;
-				case Ncip::BmcAssignment::Positive: output << " " << (variable + 1); break;
-				case Ncip::BmcAssignment::Negative: output << " -" << (variable + 1); break;
-				default: __builtin_unreachable();
-			}
-		}
-		output << " 0" << std::endl;
-	}
-}
-
-static void ExportDimspecCertificate(std::ostream& output, const Ncip::DimspecProblem& problem, const Ncip::BmcCertificate& certificate) {
-	Ncip::DimspecCertificateBuilder builder;
-	ExportDimspecProblem(output, builder.Build(problem, certificate));
 }

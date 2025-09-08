@@ -45,12 +45,11 @@ namespace Ncip {
 
 static BackendVariableType MapVariableType(BackendClauseType clauseType, bool isGlobal, bool isProtected);
 static BackendClauseType MapClauseType(SolverClauseType type, ssize_t shift);
-static BmcCertificate CreateCertificate(const BmcClauses& invariant, const BmcLiteral& root);
 
 template<typename ImplTag>
 BmcSolver<ImplTag>::BmcSolver(BmcProblem problem_, BmcConfiguration configuration_):
-	problem(problem_),
-	configuration(configuration_),
+	problem(std::move(problem_)),
+	configuration(std::move(configuration_)),
 	globalVariables(),
 	protectedVariables(),
 	nextVariable(0u),
@@ -59,15 +58,12 @@ BmcSolver<ImplTag>::BmcSolver(BmcProblem problem_, BmcConfiguration configuratio
 	interrupted(false),
 	bmcSolver(),
 	preSolver(),
-	fpcSolver()
-#ifndef NDEBUG
-	,
+	fpcSolver(),
 	debugSolves(0),
 	debugVariables(),
 	debugDisabledTriggers(),
 	debugAssumptions(),
 	debugClauses()
-#endif
 {
 	InitializeProtectedGlobalVariables();
 }
@@ -81,11 +77,17 @@ BmcSolver<ImplTag>::BmcSolver(BmcSolver&& other):
 	nextVariable(other.nextVariable),
 	solverVariables(std::move(other.solverVariables)),
 	mutex(),
-	interrupted(),
+	interrupted(false),
 	bmcSolver(std::move(other.bmcSolver)),
 	preSolver(std::move(other.preSolver)),
-	fpcSolver(std::move(other.fpcSolver))
-{}
+	fpcSolver(std::move(other.fpcSolver)),
+	debugSolves(0),
+	debugVariables(),
+	debugDisabledTriggers(),
+	debugAssumptions(),
+	debugClauses()
+{
+}
 
 template<typename ImplTag>
 BmcSolver<ImplTag>::~BmcSolver() = default;
@@ -160,6 +162,11 @@ BmcResult BmcSolver<ImplTag>::Solve() {
 	} catch (std::bad_alloc& outOfMemory) {
 		result = BmcResult::ForMemoryLimit();
 	}
+#ifdef NCIP_BACKEND_MINICRAIG
+	catch (MiniCraig::OutOfMemoryException& error) {
+		result = BmcResult::ForMemoryLimit();
+	}
+#endif
 #ifdef NCIP_BACKEND_KITTENCRAIG
 	catch (KittenError& error) {
 		result = BmcResult::ForMemoryLimit();
@@ -401,9 +408,8 @@ BmcResult BmcSolver<ImplTag>::SolveImpl() {
 		// 2) Depth > 0 (Step)
 		//    There exist a transition from I to !P in 1 to k steps.
 		//      A = I0 & T0->1
-		//      B = !P1 v (T1->2 & (!P2 v ... (Tn-1->n & !Pn))
-		//    The B side is split into two parts: Reaching !P or making steps (Px -> Tx->x+1).
-		//      B = (!P1 v !P2 v ... v !Pn) & (P1 -> T1->2) & (P2 -> T2->3) & ... & (Pn-1 -> Tn-1->n)
+		//    The B side is split into two parts: Reaching !P or making steps ((P1 & ... & Px) -> Tx->x+1).
+		//      B = (!P1 v !P2 v ... v !Pn) & (P1 -> T1->2) & ((P1 & P2) -> T2->3) & ... & ((P1 & ... & Pn-1) -> Tn-1->n)
 		BmcClauses aSideClauses;
 		BmcClauses bSideClauses;
 		if (depth == 0) {
@@ -419,7 +425,11 @@ BmcResult BmcSolver<ImplTag>::SolveImpl() {
 					bSideClauses.push_back({ transTrigger >> index });
 				} else {
 					// When the target is not fulfilled then force a transition.
-					bSideClauses.push_back({ targetTrigger >> index, transTrigger >> index });
+					BmcClause clause { transTrigger >> index };
+					for (ssize_t target { 1 }; target <= index; target++) {
+						clause.push_back(targetTrigger >> target);
+					}
+					bSideClauses.push_back(clause);
 				}
 			}
 			BmcClause targetReached;
@@ -722,7 +732,7 @@ BmcResult BmcSolver<ImplTag>::SolveImpl() {
 				//    There exist a transition from the union of all Craig interpolants (C[0]1<-0 v ... v C[x]1<-0) to !P in 1 to k steps.
 				//      A = (C[0]1<-0 v ... v C[x]1<-0) & T0->1
 				//      B = !P1 v (T1->2 & (!P2 v ... (Tn-1->n & !Pn))
-				//    The B side is split into two parts: Reaching !P or making steps (Px -> Tx->x+1).
+				//    The B side is split into two parts: Reaching !P or making steps ((P1 & ... & Px) -> Tx->x+1).
 				//      B = (!P1 v !P2 v ... v !Pn) & (P1 -> T1->2) & ((P1 & P2) -> T2->3) & ... & ((P1 & ... & Pn-1) -> Tn-1->n)
 				BmcClauses aSideClauses;
 				aSideClauses.push_back(craigTriggers);

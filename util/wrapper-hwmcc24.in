@@ -1,0 +1,3 @@
+#!/bin/sh
+DIR="$(cd "$(dirname "$0")" && pwd)"
+exec "$DIR/ncip-@NCIP_EXECUTABLE@" --format=@NCIP_FORMAT@ --export-model=$2 --export-certificate=$3 $1

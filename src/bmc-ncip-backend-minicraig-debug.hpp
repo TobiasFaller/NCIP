@@ -10,15 +10,15 @@
 #include <iostream>
 #include <fstream>
 
-#ifdef INCLUDE_PREFIXED
+#if __has_include(<minicraig-2.2.0/craig/CraigSolver.h>)
 #include <minicraig-2.2.0/craig/CraigSolver.h>
 #include <minicraig-2.2.0/simp/SimpSolver.h>
 #include <minicraig-2.2.0/preproc/Preprocessor.h>
-#else /* INCLUDE_PREFIXED */
+#else
 #include <craig/CraigSolver.h>
 #include <simp/SimpSolver.h>
 #include <preproc/Preprocessor.h>
-#endif /* INCLUDE_PREFIXED */
+#endif
 
 namespace Ncip {
 namespace Backend {
@@ -149,15 +149,15 @@ public:
 		if constexpr (is_craig) {
 			std::cerr << "-T- #include <cassert>" << std::endl;
 			std::cerr << "-T- #include <iostream>" << std::endl;
-#ifdef INCLUDE_PREFIXED
+#if __has_include(<minicraig-2.2.0/craig/CraigSolver.h>)
 			std::cerr << "-T- #include <minicraig-2.2.0/craig/CraigSolver.h>" << std::endl;
 			std::cerr << "-T- #include <minicraig-2.2.0/simp/SimpSolver.h>" << std::endl;
 			std::cerr << "-T- #include <minicraig-2.2.0/preproc/Preprocessor.h>" << std::endl;
-#else /* INCLUDE_PREFIXED */
+#else
 			std::cerr << "-T- #include <craig/CraigSolver.h>" << std::endl;
 			std::cerr << "-T- #include <simp/SimpSolver.h>" << std::endl;
 			std::cerr << "-T- #include <preproc/Preprocessor.h>" << std::endl;
-#endif /* INCLUDE_PREFIXED */
+#endif
 			std::cerr << "-T- " << std::endl;
 			std::cerr << "-T- ssize_t to_signed(size_t literal) {" << std::endl;
 			std::cerr << "-T-   return static_cast<ssize_t>((literal >> 1) + 1) * ((literal & 1) ? -1 : 1);" << std::endl;

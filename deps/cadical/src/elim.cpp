@@ -37,7 +37,7 @@ inline double Internal::compute_elim_score (unsigned lit) {
 
 /*------------------------------------------------------------------------*/
 
-inline bool elim_more::operator() (unsigned a, unsigned b) {
+bool elim_more::operator() (unsigned a, unsigned b) {
   const auto s = internal->compute_elim_score (a);
   const auto t = internal->compute_elim_score (b);
   if (s > t)
@@ -56,9 +56,9 @@ inline bool elim_more::operator() (unsigned a, unsigned b) {
 // or as consequence of other preprocessors, these subsumption rounds during
 // search can remove (irredundant) clauses (and literals), which in turn
 // might make new bounded variable elimination possible.  This is tested
-// in the 'bool eliminating ()' guard.
+// in the 'bool ineliminating ()' guard.
 
-bool Internal::eliminating () {
+bool Internal::ineliminating () {
 
   if (!opts.elim)
     return false;
@@ -80,6 +80,7 @@ bool Internal::eliminating () {
   if (last.elim.marked < stats.mark.elim)
     return true;
 
+  // VERBOSE (3, "elim not scheduled due to fixpoint");
   return false;
 }
 
@@ -307,9 +308,7 @@ bool Internal::resolve_clauses (Eliminator &eliminator, Clause *c,
         continue;
       analyzed.push_back (lit);
       f.seen = true;
-      const unsigned uidx = vlit (-lit);
-      uint64_t id = unit_clauses[uidx];
-      assert (id);
+      int64_t id = unit_id (-lit);
       lrat_chain.push_back (id);
       continue;
     } else
@@ -348,9 +347,7 @@ bool Internal::resolve_clauses (Eliminator &eliminator, Clause *c,
         continue;
       analyzed.push_back (lit);
       f.seen = true;
-      const unsigned uidx = vlit (-lit);
-      uint64_t id = unit_clauses[uidx];
-      assert (id);
+      int64_t id = unit_id (-lit);
       lrat_chain.push_back (id);
       continue;
     } else if ((tmp = marked (lit)) < 0) {
@@ -393,8 +390,6 @@ bool Internal::resolve_clauses (Eliminator &eliminator, Clause *c,
   if (!size) {
     clause.clear ();
     LOG ("empty resolvent");
-    // TODO: lrat?? c or d (or both) should be sufficient.
-    // -> also need all unit ids (for negated lits in c and d)
     learn_empty_clause (); // already clears lrat_chain.
     return false;
   }
@@ -403,8 +398,6 @@ bool Internal::resolve_clauses (Eliminator &eliminator, Clause *c,
     int unit = clause[0];
     LOG ("unit resolvent %d", unit);
     clause.clear ();
-    // TODO: lrat, prob c + d
-    // -> also need all unit ids (for negated lits in c and d)
     assign_unit (unit); // already clears lrat_chain.
     if (propagate_eagerly)
       elim_propagate (eliminator, unit);
@@ -422,7 +415,7 @@ bool Internal::resolve_clauses (Eliminator &eliminator, Clause *c,
     assert (s == size + 1);
     assert (t == size + 1);
     clause.clear ();
-    // TODO: LRAT is c + d (+ eventual units)
+    // LRAT is c + d (+ eventual units)
     elim_on_the_fly_self_subsumption (eliminator, c, pivot);
     LOG (d, "double pivot %d on-the-fly self-subsuming resolution", -pivot);
     stats.elimotfsub++;
@@ -439,7 +432,7 @@ bool Internal::resolve_clauses (Eliminator &eliminator, Clause *c,
   if (s > size) {
     assert (s == size + 1);
     clause.clear ();
-    // TODO: LRAT is c + d (+ eventual units) -> not 100% sure.
+    // LRAT is c + d (+ eventual units)
     elim_on_the_fly_self_subsumption (eliminator, c, pivot);
     return false;
   }
@@ -449,13 +442,10 @@ bool Internal::resolve_clauses (Eliminator &eliminator, Clause *c,
   if (t > size) {
     assert (t == size + 1);
     clause.clear ();
-    // TODO: LRAT is c + d (+ eventual units) -> same.
+    // LRAT is c + d (+ eventual units) -> same.
     elim_on_the_fly_self_subsumption (eliminator, d, -pivot);
     return false;
   }
-
-  // TODO: either clear lrat_chain or check what we do from here on out.
-  // if propagate_eagerly is true we want to clear lrat_chain, else leave it
   if (propagate_eagerly)
     lrat_chain.clear ();
   return true;
@@ -473,6 +463,7 @@ bool Internal::resolve_clauses (Eliminator &eliminator, Clause *c,
 bool Internal::elim_resolvents_are_bounded (Eliminator &eliminator,
                                             int pivot) {
   const bool substitute = !eliminator.gates.empty ();
+  const bool resolve_gates = eliminator.definition_unit;
   if (substitute)
     LOG ("trying to substitute %d", pivot);
 
@@ -508,7 +499,7 @@ bool Internal::elim_resolvents_are_bounded (Eliminator &eliminator,
       assert (!d->redundant);
       if (d->garbage)
         continue;
-      if (substitute && c->gate == d->gate)
+      if (!resolve_gates && substitute && c->gate == d->gate)
         continue;
       stats.elimrestried++;
       if (resolve_clauses (eliminator, c, pivot, d, true)) {
@@ -548,10 +539,30 @@ inline void Internal::elim_add_resolvents (Eliminator &eliminator,
                                            int pivot) {
 
   const bool substitute = !eliminator.gates.empty ();
+  const bool resolve_gates = eliminator.definition_unit;
   if (substitute) {
     LOG ("substituting pivot %d by resolving with %zd gate clauses", pivot,
          eliminator.gates.size ());
     stats.elimsubst++;
+  }
+  switch (eliminator.gatetype) {
+  case EQUI:
+    stats.eliminated_equi++;
+    break;
+  case AND:
+    stats.eliminated_and++;
+    break;
+  case ITE:
+    stats.eliminated_ite++;
+    break;
+  case XOR:
+    stats.eliminated_xor++;
+    break;
+  case DEF:
+    stats.eliminated_def++;
+    break;
+  default:
+    assert (eliminator.gatetype == NO);
   }
 
   LOG ("adding all resolvents on %d", pivot);
@@ -574,7 +585,7 @@ inline void Internal::elim_add_resolvents (Eliminator &eliminator,
         break;
       if (d->garbage)
         continue;
-      if (substitute && c->gate == d->gate)
+      if (!resolve_gates && substitute && c->gate == d->gate)
         continue;
       if (!resolve_clauses (eliminator, c, pivot, d, false))
         continue;
@@ -598,12 +609,15 @@ inline void Internal::elim_add_resolvents (Eliminator &eliminator,
 // Remove clauses with 'pivot' and '-pivot' by marking them as garbage and
 // push them on the extension stack.
 
-void Internal::mark_eliminated_clauses_as_garbage (Eliminator &eliminator,
-                                                   int pivot) {
+void Internal::mark_eliminated_clauses_as_garbage (
+    Eliminator &eliminator, int pivot, bool &deleted_binary_clause) {
   assert (!unsat);
 
   LOG ("marking irredundant clauses with %d as garbage", pivot);
 
+  const int elit = internal->externalize (pivot);
+  const int eidx = abs (elit);
+  const bool is_extension_var = opts.factornoreconstr && external->ervars[eidx] && !flags(pivot).factored_but_on_reconstruction_stack;
   const int64_t substitute = eliminator.gates.size ();
   if (substitute)
     LOG ("pushing %" PRId64 " gate clauses on extension stack", substitute);
@@ -616,9 +630,12 @@ void Internal::mark_eliminated_clauses_as_garbage (Eliminator &eliminator,
       continue;
     assert (!c->redundant);
     if (!substitute || c->gate) {
-      if (proof)
+      if (proof && !is_extension_var)
         proof->weaken_minus (c);
-      external->push_clause_on_extension_stack (c, pivot);
+      if (c->size == 2)
+        deleted_binary_clause = true;
+      if (!is_extension_var)
+	external->push_clause_on_extension_stack (c, pivot);
 #ifndef NDEBUG
       pushed++;
 #endif
@@ -636,10 +653,12 @@ void Internal::mark_eliminated_clauses_as_garbage (Eliminator &eliminator,
       continue;
     assert (!d->redundant);
     if (!substitute || d->gate) {
-      if (proof) {
+      if (proof && !is_extension_var)
         proof->weaken_minus (d);
-      }
-      external->push_clause_on_extension_stack (d, -pivot);
+      if (d->size == 2)
+        deleted_binary_clause = true;
+      if (!is_extension_var)
+	external->push_clause_on_extension_stack (d, -pivot);
 #ifndef NDEBUG
       pushed++;
 #endif
@@ -660,9 +679,8 @@ void Internal::mark_eliminated_clauses_as_garbage (Eliminator &eliminator,
 /*------------------------------------------------------------------------*/
 
 // Try to eliminate 'pivot' by bounded variable elimination.
-
-void Internal::try_to_eliminate_variable (Eliminator &eliminator,
-                                          int pivot) {
+void Internal::try_to_eliminate_variable (Eliminator &eliminator, int pivot,
+                                          bool &deleted_binary_clause) {
 
   if (!active (pivot))
     return;
@@ -706,11 +724,13 @@ void Internal::try_to_eliminate_variable (Eliminator &eliminator,
       LOG ("number of resolvents on %d are bounded", pivot);
       elim_add_resolvents (eliminator, pivot);
       if (!unsat)
-        mark_eliminated_clauses_as_garbage (eliminator, pivot);
+        mark_eliminated_clauses_as_garbage (eliminator, pivot,
+                                            deleted_binary_clause);
       if (active (pivot))
         mark_eliminated (pivot);
-    } else
+    } else {
       LOG ("too many resolvents on %d so not eliminated", pivot);
+    }
   }
 
   unmark_gate_clauses (eliminator);
@@ -749,7 +769,7 @@ void Internal::
 // variables have been tried).  Otherwise it was asynchronously terminated
 // or the resolution limit was hit.
 
-int Internal::elim_round (bool &completed) {
+int Internal::elim_round (bool &completed, bool &deleted_binary_clause) {
 
   assert (opts.elim);
   assert (!unsat);
@@ -757,6 +777,7 @@ int Internal::elim_round (bool &completed) {
   START_SIMPLIFIER (elim, ELIM);
   stats.elimrounds++;
 
+  int64_t marked_before = last.elim.marked;
   last.elim.marked = stats.mark.elim;
   assert (!level);
 
@@ -764,11 +785,11 @@ int Internal::elim_round (bool &completed) {
 
   if (opts.elimlimited) {
     int64_t delta = stats.propagations.search;
-    delta *= 1e-3 * opts.elimreleff;
-    if (delta < opts.elimineff)
-      delta = opts.elimineff;
-    if (delta > opts.elimaxeff)
-      delta = opts.elimaxeff;
+    delta *= 1e-3 * opts.elimeffort;
+    if (delta < opts.elimmineff)
+      delta = opts.elimmineff;
+    if (delta > opts.elimmaxeff)
+      delta = opts.elimmaxeff;
     delta = max (delta, (int64_t) 2l * active ());
 
     PHASE ("elim-round", stats.elimrounds,
@@ -816,6 +837,7 @@ int Internal::elim_round (bool &completed) {
 
   Eliminator eliminator (this);
   ElimSchedule &schedule = eliminator.schedule;
+  assert (schedule.empty ());
 
   // Now find elimination candidates which occurred in clauses removed since
   // the last time we ran bounded variable elimination, which in turned
@@ -828,7 +850,6 @@ int Internal::elim_round (bool &completed) {
       continue;
     if (!flags (idx).elim)
       continue;
-    flags (idx).elim = false;
     LOG ("scheduling %d for elimination initially", idx);
     schedule.push_back (idx);
   }
@@ -874,7 +895,7 @@ int Internal::elim_round (bool &completed) {
     int idx = schedule.front ();
     schedule.pop_front ();
     flags (idx).elim = false;
-    try_to_eliminate_variable (eliminator, idx);
+    try_to_eliminate_variable (eliminator, idx, deleted_binary_clause);
 #ifndef QUIET
     tried++;
 #endif
@@ -889,6 +910,9 @@ int Internal::elim_round (bool &completed) {
   // ran into the resolution limit (or derived unsatisfiability).
   //
   completed = !schedule.size ();
+
+  if (!completed)
+    last.elim.marked = marked_before;
 
   PHASE ("elim-round", stats.elimrounds,
          "tried to eliminate %" PRId64 " variables %.0f%% (%zd remain)",
@@ -978,6 +1002,20 @@ void Internal::increase_elimination_bound () {
   report ('^');
 }
 
+void Internal::init_citten () {
+  if (!opts.elimdef)
+    return;
+  assert (!citten);
+  citten = kitten_init ();
+}
+
+void Internal::reset_citten () {
+  if (citten) {
+    kitten_release (citten);
+    citten = 0;
+  }
+}
+
 /*------------------------------------------------------------------------*/
 
 void Internal::elim (bool update_limits) {
@@ -995,6 +1033,11 @@ void Internal::elim (bool update_limits) {
   PHASE ("elim-phase", stats.elimphases,
          "starting at most %d elimination rounds", opts.elimrounds);
 
+  if (external_prop) {
+    assert (!level);
+    private_steps = true;
+  }
+
 #ifndef QUIET
   int old_active_variables = active ();
   int old_eliminated = stats.all.eliminated;
@@ -1004,9 +1047,11 @@ void Internal::elim (bool update_limits) {
   // elimination including vivification etc.
   //
   if (last.elim.subsumephases == stats.subsumephases)
-    subsume (update_limits);
+    subsume ();
 
   reset_watches (); // saves lots of memory
+
+  init_citten ();
 
   // Alternate one round of bounded variable elimination ('elim_round') and
   // subsumption ('subsume_round'), blocked ('block') and covered clause
@@ -1019,18 +1064,19 @@ void Internal::elim (bool update_limits) {
   // variable elimination phase ('elim') ran until completion.  This
   // potentially triggers an incremental increase of the elimination bound.
   //
-  bool phase_complete = false;
+  bool phase_complete = false, deleted_binary_clause = false;
 
   int round = 1;
+#ifndef QUIET
+  int eliminated = 0;
+#endif
 
+  bool round_complete = false;
   while (!unsat && !phase_complete && !terminated_asynchronously ()) {
-
-    bool round_complete;
-
 #ifndef QUIET
     int eliminated =
 #endif
-        elim_round (round_complete);
+        elim_round (round_complete, deleted_binary_clause);
 
     if (!round_complete) {
       PHASE ("elim-phase", stats.elimphases, "last round %d incomplete %s",
@@ -1081,6 +1127,9 @@ void Internal::elim (bool update_limits) {
            stats.elimcompleted + 1, lim.elimbound);
   }
 
+  reset_citten ();
+  if (deleted_binary_clause)
+    delete_garbage_clauses ();
   init_watches ();
   connect_watches ();
 
@@ -1102,10 +1151,15 @@ void Internal::elim (bool update_limits) {
     increase_elimination_bound ();
 
 #ifndef QUIET
-  int eliminated = stats.all.eliminated - old_eliminated;
+  eliminated = stats.all.eliminated - old_eliminated;
   PHASE ("elim-phase", stats.elimphases, "eliminated %d variables %.2f%%",
          eliminated, percent (eliminated, old_active_variables));
 #endif
+
+  if (external_prop) {
+    assert (!level);
+    private_steps = false;
+  }
 
   if (!update_limits)
     return;

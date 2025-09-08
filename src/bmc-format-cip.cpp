@@ -109,7 +109,7 @@ void CipProblemBuilder::Check() const {
 			if (literal.GetTimeframe() != 0 && variables[literal.GetVariable()] != CipVariableType::Latch) {
 				throw CipProblemException("Found literal in TRANS that is declared for timeframe " + std::to_string(literal.GetTimeframe()) + " and not a latch");
 			}
-			if ((literal.GetTimeframe() < 0) | (literal.GetTimeframe() > 1)) {
+			if ((literal.GetTimeframe() < 0) || (literal.GetTimeframe() > 1)) {
 				throw CipProblemException("Found literal in TRANS that is declared for timeframe " + std::to_string(literal.GetTimeframe()) + ", which is < 0 or > 1");
 			}
 		}
@@ -126,8 +126,7 @@ void CipProblemBuilder::Check() const {
 std::tuple<CipProblem, BmcProblem> CipProblemBuilder::Build() {
 	Check();
 	CipProblem cipProblem { variables, initClauses, transClauses, targetClauses };
-	BmcProblem bmcProblem { variables.size(), std::move(initClauses), std::move(transClauses), std::move(targetClauses) };
-	Clear();
+	BmcProblem bmcProblem { variables.size(), initClauses, transClauses, targetClauses };
 	return { cipProblem, bmcProblem };
 }
 

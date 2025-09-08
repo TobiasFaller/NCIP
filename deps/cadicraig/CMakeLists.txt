@@ -58,18 +58,22 @@ set(CADICAL_LIB_SOURCES
   ${CADICAL_DIR}/src/compact.cpp
   ${CADICAL_DIR}/src/condition.cpp
   ${CADICAL_DIR}/src/config.cpp
+  ${CADICAL_DIR}/src/congruence.cpp
   ${CADICAL_DIR}/src/constrain.cpp
   ${CADICAL_DIR}/src/contract.cpp
   ${CADICAL_DIR}/src/cover.cpp
   ${CADICAL_DIR}/src/decide.cpp
   ${CADICAL_DIR}/src/decompose.cpp
   ${CADICAL_DIR}/src/deduplicate.cpp
+  ${CADICAL_DIR}/src/definition.cpp
   ${CADICAL_DIR}/src/drattracer.cpp
   ${CADICAL_DIR}/src/elim.cpp
+  ${CADICAL_DIR}/src/elimfast.cpp
   ${CADICAL_DIR}/src/ema.cpp
   ${CADICAL_DIR}/src/extend.cpp
   ${CADICAL_DIR}/src/external.cpp
   ${CADICAL_DIR}/src/external_propagate.cpp
+  ${CADICAL_DIR}/src/factor.cpp
   ${CADICAL_DIR}/src/file.cpp
   ${CADICAL_DIR}/src/flags.cpp
   ${CADICAL_DIR}/src/flip.cpp
@@ -83,7 +87,6 @@ set(CADICAL_LIB_SOURCES
   ${CADICAL_DIR}/src/limit.cpp
   ${CADICAL_DIR}/src/logging.cpp
   ${CADICAL_DIR}/src/lookahead.cpp
-  ${CADICAL_DIR}/src/lratbuilder.cpp
   ${CADICAL_DIR}/src/lratchecker.cpp
   ${CADICAL_DIR}/src/lrattracer.cpp
   ${CADICAL_DIR}/src/lucky.cpp
@@ -111,18 +114,23 @@ set(CADICAL_LIB_SOURCES
   ${CADICAL_DIR}/src/signal.cpp
   ${CADICAL_DIR}/src/solution.cpp
   ${CADICAL_DIR}/src/solver.cpp
+  ${CADICAL_DIR}/src/stable.cpp
   ${CADICAL_DIR}/src/stats.cpp
   ${CADICAL_DIR}/src/subsume.cpp
+  ${CADICAL_DIR}/src/sweep.cpp
   ${CADICAL_DIR}/src/terminal.cpp
   ${CADICAL_DIR}/src/ternary.cpp
+  ${CADICAL_DIR}/src/tier.cpp
   ${CADICAL_DIR}/src/transred.cpp
+  ${CADICAL_DIR}/src/unstable.cpp
   ${CADICAL_DIR}/src/util.cpp
   ${CADICAL_DIR}/src/var.cpp
   ${CADICAL_DIR}/src/veripbtracer.cpp
   ${CADICAL_DIR}/src/version.cpp
   ${CADICAL_DIR}/src/vivify.cpp
   ${CADICAL_DIR}/src/walk.cpp
-  ${CADICAL_DIR}/src/watch.cpp)
+  ${CADICAL_DIR}/src/watch.cpp
+  ${CADICAL_DIR}/src/kitten.c)
 set(CADICAL_LIB_HEADERS
   ${CADICAL_DIR}/src/ccadical.h
   ${CADICAL_DIR}/src/cadical.hpp)

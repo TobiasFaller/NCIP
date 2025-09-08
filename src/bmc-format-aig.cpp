@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <iostream>
+#include <sstream>
 
 namespace Ncip {
 
@@ -17,7 +18,8 @@ AigProblem::AigProblem(
 	std::vector<AigEdge> ands,
 	std::vector<AigEdge> outputs,
 	std::vector<AigEdge> bads,
-	std::vector<AigEdge> constraints
+	std::vector<AigEdge> constraints,
+	std::vector<std::string> comments
 ):
 	nodes(nodes),
 	inputs(inputs),
@@ -25,7 +27,8 @@ AigProblem::AigProblem(
 	ands(ands),
 	outputs(outputs),
 	bads(bads),
-	constraints(constraints)
+	constraints(constraints),
+	comments(comments)
 {}
 
 AigProblemBuilder::AigProblemBuilder():
@@ -133,6 +136,10 @@ void AigProblemBuilder::AddConstraint(AigEdge edge) {
 	constraints.push_back(edge);
 }
 
+void AigProblemBuilder::AddComment(std::string comment) {
+	comments.push_back(comment);
+}
+
 void AigProblemBuilder::Check() const {
 	if (bads.size() == 0 && outputs.size() == 0) {
 		throw AigProblemException("Assuming AIG for safety property (expecting at least one bad or output), got neither bads nor outputs");
@@ -187,25 +194,23 @@ void AigProblemBuilder::Check() const {
 	}
 }
 
-std::tuple<AigProblem, BmcProblem> AigProblemBuilder::Build() {
+std::tuple<AigProblem, BmcProblem> AigProblemBuilder::Build(bool encodeOutputs) {
 	Check();
-
-	// Allow for old output-based property encoding.
-	auto &bads = (this->bads.size() == 0)
-		? this->outputs
-		: this->bads;
-
-	std::vector<AigNodeType> nodeTypes (nodes.size(), AigNodeType::Undefined);
-	for (auto index { 0 }; index < nodes.size(); index++) {
-		auto& node { nodes[index] };
-		nodeTypes[node.nodeId / 2] = node.type;
-	}
+	std::vector<AigNode> nodes { this->nodes };
+	std::vector<AigEdge> ands { this->ands };
+	const std::vector<AigEdge> inputs { this->inputs };
+	const std::vector<AigEdge> latches { this->latches };
+	const std::vector<AigEdge> outputs { this->outputs };
+	const std::vector<AigEdge> bads { (this->bads.size() == 0) ? this->outputs : this->bads };
+	const std::vector<AigEdge> constraints { this->constraints };
 
 	// There will be more variables than nodes.size() as we encode the Tseitin variables
 	// used for the bad output possibly twice.
-	std::vector<AigNodeType> variables;
-	variables.reserve(nodes.size());
-	std::copy(nodeTypes.begin(), nodeTypes.end(), std::back_inserter(variables));
+	std::vector<AigNodeType> variables (nodes.size(), AigNodeType::Undefined);
+	for (auto index { 0 }; index < nodes.size(); index++) {
+		auto& node { nodes[index] };
+		variables[node.nodeId / 2] = node.type;
+	}
 
 	// Timeframe meanings:
 	// 0: Literal has been allocated and everything is encoded
@@ -220,8 +225,8 @@ std::tuple<AigProblem, BmcProblem> AigProblemBuilder::Build() {
 	initLiterals.reserve(nodes.size());
 	transLiterals.reserve(nodes.size());
 	targetLiterals.reserve(nodes.size());
-	for (size_t index { 0u }; index < nodeTypes.size(); index++) {
-		bool allocated { nodeTypes[index] != AigNodeType::And };
+	for (size_t index { 0u }; index < variables.size(); index++) {
+		bool allocated { variables[index] != AigNodeType::And };
 		initLiterals.push_back(BmcLiteral::FromVariable(index, false, allocated ? 0 : -1));
 		transLiterals.push_back(BmcLiteral::FromVariable(index, false, allocated ? 0 : -2));
 		targetLiterals.push_back(BmcLiteral::FromVariable(index, false, allocated ? 0 : -1));
@@ -235,6 +240,7 @@ std::tuple<AigProblem, BmcProblem> AigProblemBuilder::Build() {
 
 			auto left { nodes[index].leftEdgeId };
 			auto right { nodes[index].rightEdgeId };
+			ands.push_back(nodes.size() * 2u);
 			nodes.push_back({ AigNodeType::And, nodes.size() * 2u, left, right });
 			return literal;
 		};
@@ -249,7 +255,9 @@ std::tuple<AigProblem, BmcProblem> AigProblemBuilder::Build() {
 
 			// Don't take references here as we are extending the vectors.
 			auto literal = literals[lookupIndex];
-			if (literal.GetTimeframe() == 0) { continue; }
+			if (literal.GetTimeframe() == 0) {
+				continue; // Node already encoded
+			}
 
 			// We need a copy of the Tseitin variable for the INIT / TARGET clauses.
 			literal = (literal.GetTimeframe() == -1)
@@ -268,16 +276,16 @@ std::tuple<AigProblem, BmcProblem> AigProblemBuilder::Build() {
 			// and create Tseitin-variables for them if this didn't happen yet.
 			if (literals[leftIndex].GetTimeframe() < 0) { queue.push(leftIndex); }
 			if (literals[leftIndex].GetTimeframe() == -1) {
-				leftIndex = add_tseitin(leftIndex, -2).GetVariable();
+				literals[leftIndex] = add_tseitin(leftIndex, -2);
+				leftIndex = literals[leftIndex].GetVariable();
 				leftEdge = (leftIndex * 2u) | (leftEdge & 1u);
-				nodes[nodeIndex].leftEdgeId = leftEdge;
 			}
 
 			if (literals[rightIndex].GetTimeframe() < 0) { queue.push(rightIndex); }
 			if (literals[rightIndex].GetTimeframe() == -1) {
-				rightIndex = add_tseitin(rightIndex, -2).GetVariable();
+				literals[rightIndex] = add_tseitin(rightIndex, -2);
+				rightIndex = literals[rightIndex].GetVariable();
 				rightEdge = (rightIndex * 2u) | (rightEdge & 1u);
-				nodes[nodeIndex].rightEdgeId = rightEdge;
 			}
 
 			auto leftLiteral = literals[leftIndex].ToZeroTimeframe() ^ (leftEdge & 1);
@@ -308,12 +316,6 @@ std::tuple<AigProblem, BmcProblem> AigProblemBuilder::Build() {
 	BmcClauses initClauses { { -initLiterals[0] } };
 	tseitin_transform(initLiterals, initEdges, initClauses, initEncoded);
 
-	// Re-map the latch resets as they have been re-encoded during the Tseitin transformation.
-	for (auto& latch : latches) {
-		auto& reset { nodes[latch / 2].rightEdgeId };
-		reset = (initLiterals[reset / 2].GetVariable() * 2u) | (reset & 1);
-	}
-
 	for (size_t index { 0 }; index < nodes.size(); index++) {
 		if (nodes[index].type == AigNodeType::Latch) {
 			auto latch { initLiterals[nodes[index].nodeId / 2] };
@@ -328,8 +330,8 @@ std::tuple<AigProblem, BmcProblem> AigProblemBuilder::Build() {
 	}
 
 	std::vector<AigEdge> transEdges;
-	transEdges.reserve(outputs.size() + nextStates.size() + constraints.size());
-	transEdges.insert(transEdges.end(), outputs.begin(), outputs.end());
+	transEdges.reserve((encodeOutputs ? outputs.size() : 0u) + nextStates.size() + constraints.size());
+	if (encodeOutputs) { transEdges.insert(transEdges.end(), outputs.begin(), outputs.end()); }
 	transEdges.insert(transEdges.end(), nextStates.begin(), nextStates.end());
 	transEdges.insert(transEdges.end(), constraints.begin(), constraints.end());
 
@@ -357,18 +359,13 @@ std::tuple<AigProblem, BmcProblem> AigProblemBuilder::Build() {
 	}
 
 	std::vector<AigEdge> targetEdges;
-	targetEdges.reserve(bads.size() + 1);
+	targetEdges.reserve(bads.size() + constraints.size());
 	targetEdges.insert(targetEdges.end(), bads.begin(), bads.end());
 	targetEdges.insert(targetEdges.end(), constraints.begin(), constraints.end());
 
 	size_t targetEncoded { 0 };
 	BmcClauses targetClauses { { -targetLiterals[0] } };
 	tseitin_transform(targetLiterals, targetEdges, targetClauses, targetEncoded);
-
-	// Re-map the outputs as they have been re-encoded during the Tseitin transformation.
-	for (auto& bad : bads) {
-		bad = (targetLiterals[bad / 2].GetVariable() * 2u) | (bad & 1);
-	}
 
 	targetClauses.emplace_back();
 	for (auto& bad : bads) {
@@ -384,11 +381,22 @@ std::tuple<AigProblem, BmcProblem> AigProblemBuilder::Build() {
 		targetClauses.push_back({ literal });
 	}
 
-	AigProblem aigProblem { std::move(nodes), std::move(inputs), std::move(latches), std::move(ands), std::move(outputs), std::move(bads), std::move(constraints) };
-	BmcProblem bmcProblem { variables.size(), std::move(initClauses), std::move(transClauses), std::move(targetClauses) };
-	std::tuple<AigProblem, BmcProblem> result { aigProblem, bmcProblem };
-	Clear();
-	return result;
+	// The outputs and bad states are outputs of AND-gates and are
+	// not shared for better preprocessing.
+	// => Add clauses to make the literals of the transition relation
+	//    equal to the target literals in the final timeframe.
+	for (auto& bad : bads) {
+		// Trans literal might not be required / encoded for transition relation
+		// and have negative timeframe (not encoded).
+		auto transLiteral { transLiterals[bad / 2].ToZeroTimeframe() ^ (bad & 1) };
+		auto targetLiteral { targetLiterals[bad / 2] ^ (bad & 1) };
+		targetClauses.push_back({ -targetLiteral,  transLiteral });
+		targetClauses.push_back({  targetLiteral, -transLiteral });
+	}
+
+	AigProblem aigProblem { nodes, inputs, latches, ands, outputs, bads, constraints, comments };
+	BmcProblem bmcProblem { variables.size(), initClauses, transClauses, targetClauses };
+	return { aigProblem, bmcProblem };
 }
 
 AigCertificateBuilder::AigCertificateBuilder():
@@ -404,6 +412,15 @@ AigCertificate AigCertificateBuilder::Build(const AigProblem& problem, const Bmc
 	constraints = problem.constraints;
 	outputs = { }; // Don't copy problem.outputs as they are overwritten
 	bads = { };    // Don't copy problem.bads as they are overwritten
+	comments = { }; // Don't copy problem.comments as they are overwritten
+	comments.reserve(1u + inputs.size() + latches.size());
+	comments.push_back("MAPPING " + std::to_string(inputs.size() + latches.size()));
+	for (auto& input : inputs) {
+		comments.push_back(std::to_string(input) + ' ' + std::to_string(input));
+	}
+	for (auto& latch : latches) {
+		comments.push_back(std::to_string(latch) + ' ' + std::to_string(latch));
+	}
 
 	// Encode the initial state as condition into the AIG
 	std::vector<size_t> initial;
@@ -457,7 +474,8 @@ AigCertificate AigCertificateBuilder::Build(const AigProblem& problem, const Bmc
 		std::move(ands),
 		std::move(outputs),
 		std::move(bads),
-		std::move(constraints)
+		std::move(constraints),
+		std::move(comments)
 	};
 	Clear();
 	return result;

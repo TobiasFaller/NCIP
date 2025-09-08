@@ -12,15 +12,15 @@
 #include <type_traits>
 #include <memory>
 
-#ifdef INCLUDE_PREFIXED
+#if __has_include(<kissat/kitten.h>)
 #include <kissat/kitten.h>
 #include <kittencraig/kittentracer.hpp>
 #include <kittencraig/kittenerror.hpp>
-#else /* INCLUDE_PREFIXED */
+#else
 #include <kitten.h>
 #include <kittentracer.hpp>
 #include <kittenerror.hpp>
-#endif /* INCLUDE_PREFIXED */
+#endif
 
 namespace Ncip {
 namespace Backend {

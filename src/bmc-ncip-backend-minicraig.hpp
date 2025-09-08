@@ -9,15 +9,15 @@
 #include <iostream>
 #include <fstream>
 
-#ifdef INCLUDE_PREFIXED
+#if __has_include(<minicraig-2.2.0/craig/CraigSolver.h>)
 #include <minicraig-2.2.0/craig/CraigSolver.h>
 #include <minicraig-2.2.0/simp/SimpSolver.h>
 #include <minicraig-2.2.0/preproc/Preprocessor.h>
-#else /* INCLUDE_PREFIXED */
+#else
 #include <craig/CraigSolver.h>
 #include <simp/SimpSolver.h>
 #include <preproc/Preprocessor.h>
-#endif /* INCLUDE_PREFIXED */
+#endif
 
 namespace Ncip {
 namespace Backend {

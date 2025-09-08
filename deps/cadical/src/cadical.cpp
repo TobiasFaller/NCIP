@@ -266,6 +266,8 @@ void App::print_witness (FILE *file) {
       fputc ('v', file), c = 1;
     if (i++ == max_var)
       tmp = 0;
+    else if (solver->external->ervars[i])
+      continue;
     else
       tmp = solver->val (i) < 0 ? -i : i;
     char str[32];
@@ -355,6 +357,8 @@ int App::main (int argc, char **argv) {
       return 0;
     } else if (!strcmp (arg, "--copyright")) {
       printf ("%s\n", copyright ());
+      printf ("%s\n", authors ());
+      printf ("%s\n", affiliations ());
       return 0;
     }
   }
@@ -612,6 +616,10 @@ int App::main (int argc, char **argv) {
     solver->message ("%sCaDiCaL SAT Solver%s", tout.bright_magenta_code (),
                      tout.normal_code ());
     solver->message ("%s%s%s", tout.bright_magenta_code (), copyright (),
+                     tout.normal_code ());
+    solver->message ("%s%s%s", tout.bright_magenta_code (), authors (),
+                     tout.normal_code ());
+    solver->message ("%s%s%s", tout.bright_magenta_code (), affiliations (),
                      tout.normal_code ());
     solver->message ();
     CaDiCaL::Solver::build (stdout, "c ");

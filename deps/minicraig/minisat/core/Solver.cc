@@ -226,7 +226,9 @@ bool Solver::addClause_(vec<Lit>& ps, const CraigData& craig_data, bool use_inte
     if (!ok) return false;
 
 #ifdef CRAIG_INTERPOLATION
+#ifdef CRAIG_INTERPOLATION_FUZZ_CRAIG
     int original_size = ps.size();
+#endif /* CRAIG_INTERPOLATION_FUZZ_CRAIG */
 #ifdef CRAIG_INTERPOLATION_DEBUG
     std::cerr << "Add Clause: ";
     if (craig_data.craig_type == CraigClauseType::A_CLAUSE) std::cerr << "A (";
@@ -660,7 +662,9 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt, int& out_btlevel, CraigDa
     int i, j;
     out_learnt.copyTo(analyze_toclear);
     if (ccmin_mode == 2){
+#ifdef CRAIG_INTERPOLATION
         int analyze_toclear_offset = analyze_toclear.size();
+#endif /* CRAIG_INTERPOLATION */
         for (i = j = 1; i < out_learnt.size(); i++) {
             // litRedundant(..) has side effect when craig interpolation is enabled
             if (reason(var(out_learnt[i])) == CRef_Undef || !litRedundant(out_learnt[i]))

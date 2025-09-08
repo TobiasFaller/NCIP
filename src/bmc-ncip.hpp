@@ -61,11 +61,6 @@ public:
 		maximumDepth(0u),
 		maximumCraigSize(0u),
 		logLevel(LogLevel::Info),
-#ifndef NDEBUG
-		clauseExport(false),
-		bmcExport(false),
-		debugPath("./output"),
-#endif
 		craigInterpolant(CraigInterpolant::Asymmetric),
 		enableCraigInterpolation(true),
 		enableFixPointCheck(true),
@@ -74,7 +69,10 @@ public:
 		simplifyInit(PreprocessLevel::Simple),
 		simplifyTrans(PreprocessLevel::Simple),
 		simplifyTarget(PreprocessLevel::Simple),
-		simplifyCraig(PreprocessLevel::Simple)
+		simplifyCraig(PreprocessLevel::Simple),
+		clauseExport(false),
+		bmcExport(false),
+		debugPath("./output")
 	{}
 
 	BmcConfiguration& SetMaximumDepth(size_t depth) { maximumDepth = depth; return *this; }
@@ -91,6 +89,15 @@ public:
 
 	size_t GetMaximumDepth() const { return maximumDepth; }
 	size_t GetMaximumCraigSize() const { return maximumCraigSize; }
+	CraigInterpolant GetCraigInterpolant() const { return craigInterpolant; }
+	bool GetEnableCraigInterpolation() const { return enableCraigInterpolation; }
+	bool GetEnableFixPointCheck() const { return enableFixPointCheck; }
+	bool GetEnableSanityChecks() const { return enableSanityChecks; }
+	bool GetTotalTransitionRelation() const { return totalTransitionRelation; }
+	PreprocessLevel GetPreprocessInit() const { return simplifyInit; }
+	PreprocessLevel GetPreprocessTrans() const { return simplifyTrans; }
+	PreprocessLevel GetPreprocessTarget() const { return simplifyTarget; }
+	PreprocessLevel GetPreprocessCraig() const { return simplifyCraig; }
 
 #ifndef NDEBUG
 	BmcConfiguration& SetLogLevel(LogLevel level) { logLevel = level; return *this; }
@@ -110,25 +117,10 @@ public:
 	bool IsLogLevelExactly(const LogLevel& level) const { return __builtin_expect((level < LogLevel::Debug) && (logLevel == level), false); }
 #endif
 
-	CraigInterpolant GetCraigInterpolant() const { return craigInterpolant; }
-	bool GetEnableCraigInterpolation() const { return enableCraigInterpolation; }
-	bool GetEnableFixPointCheck() const { return enableFixPointCheck; }
-	bool GetEnableSanityChecks() const { return enableSanityChecks; }
-	bool GetTotalTransitionRelation() const { return totalTransitionRelation; }
-	PreprocessLevel GetPreprocessInit() const { return simplifyInit; }
-	PreprocessLevel GetPreprocessTrans() const { return simplifyTrans; }
-	PreprocessLevel GetPreprocessTarget() const { return simplifyTarget; }
-	PreprocessLevel GetPreprocessCraig() const { return simplifyCraig; }
-
 private:
 	size_t maximumDepth;
 	size_t maximumCraigSize;
 	LogLevel logLevel;
-#ifndef NDEBUG
-	bool clauseExport;
-	bool bmcExport;
-	std::string debugPath;
-#endif
 	CraigInterpolant craigInterpolant;
 	bool enableCraigInterpolation;
 	bool enableFixPointCheck;
@@ -138,6 +130,11 @@ private:
 	PreprocessLevel simplifyTrans;
 	PreprocessLevel simplifyTarget;
 	PreprocessLevel simplifyCraig;
+
+	// Debug class members (unused with NDEBUG)
+	bool clauseExport;
+	bool bmcExport;
+	std::string debugPath;
 
 };
 
@@ -226,7 +223,7 @@ private:
 	std::unique_ptr<Backend::Solver<ImplTag, Backend::PreSolverTag>> preSolver;
 	std::unique_ptr<Backend::Solver<ImplTag, Backend::FpcSolverTag>> fpcSolver;
 
-#ifndef NDEBUG
+	// Debug class members (unused with NDEBUG)
 	struct DebugVariable { Impl::BmcVariable variable; std::string backendType; };
 	struct DebugDisabledTrigger { BmcLiteral literal; std::string backendType; };
 	struct DebugAssumption { BmcLiteral literal; };
@@ -241,7 +238,6 @@ private:
 	std::vector<DebugDisabledTrigger> debugDisabledTriggers;
 	std::vector<DebugAssumption> debugAssumptions;
 	std::vector<DebugClause> debugClauses;
-#endif
 
 };
 

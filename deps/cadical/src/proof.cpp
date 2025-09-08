@@ -10,59 +10,70 @@ using namespace std;
 
 void Internal::new_proof_on_demand () {
   if (!proof) {
-    proof = new Proof (this);
     LOG ("connecting proof to internal solver");
-    setup_lrat_builder ();
+    proof = new Proof (this);
   }
 }
 
-void Internal::setup_lrat_builder () {
-  if (lratbuilder)
-    return;
-  if (opts.externallrat) {
-    lratbuilder = new LratBuilder (this);
-    LOG ("PROOF connecting LRAT proof chain builder");
-    proof->connect (lratbuilder);
-  }
+void Internal::resize_unit_clauses_idx () {
+  size_t new_vsize = vsize ? 2 * vsize : 1 + (size_t) max_var;
+  unit_clauses_idx.resize (2 * new_vsize, 0);
 }
 
 void Internal::force_lrat () {
-  if (lrat || lratbuilder)
+  if (lrat)
     return;
+  assert (proof);
   lrat = true;
 }
 
-void Internal::connect_proof_tracer (Tracer *tracer, bool antecedents) {
+void Internal::connect_proof_tracer (Tracer *tracer, bool antecedents,
+                                     bool finalize_clauses) {
   new_proof_on_demand ();
   if (antecedents)
     force_lrat ();
+  if (finalize_clauses)
+    frat = true;
+  resize_unit_clauses_idx ();
   proof->connect (tracer);
   tracers.push_back (tracer);
 }
 
 void Internal::connect_proof_tracer (InternalTracer *tracer,
-                                     bool antecedents) {
+                                     bool antecedents,
+                                     bool finalize_clauses) {
   new_proof_on_demand ();
   if (antecedents)
     force_lrat ();
+  if (finalize_clauses)
+    frat = true;
+  resize_unit_clauses_idx ();
   tracer->connect_internal (this);
   proof->connect (tracer);
   tracers.push_back (tracer);
 }
 
-void Internal::connect_proof_tracer (StatTracer *tracer, bool antecedents) {
+void Internal::connect_proof_tracer (StatTracer *tracer, bool antecedents,
+                                     bool finalize_clauses) {
   new_proof_on_demand ();
   if (antecedents)
     force_lrat ();
+  if (finalize_clauses)
+    frat = true;
+  resize_unit_clauses_idx ();
   tracer->connect_internal (this);
   proof->connect (tracer);
   stat_tracers.push_back (tracer);
 }
 
-void Internal::connect_proof_tracer (FileTracer *tracer, bool antecedents) {
+void Internal::connect_proof_tracer (FileTracer *tracer, bool antecedents,
+                                     bool finalize_clauses) {
   new_proof_on_demand ();
   if (antecedents)
     force_lrat ();
+  if (finalize_clauses)
+    frat = true;
+  resize_unit_clauses_idx ();
   tracer->connect_internal (this);
   proof->connect (tracer);
   file_tracers.push_back (tracer);
@@ -119,9 +130,10 @@ void Internal::trace (File *file) {
   } else if (opts.frat) {
     LOG ("PROOF connecting FRAT tracer");
     bool antecedents = opts.frat == 1;
+    resize_unit_clauses_idx ();
     FileTracer *ft =
         new FratTracer (this, file, opts.binary, opts.frat == 1);
-    connect_proof_tracer (ft, antecedents);
+    connect_proof_tracer (ft, antecedents, true);
   } else if (opts.lrat) {
     LOG ("PROOF connecting LRAT tracer");
     FileTracer *ft = new LratTracer (this, file, opts.binary);
@@ -147,16 +159,23 @@ void Internal::check () {
   new_proof_on_demand ();
   if (opts.checkproof > 1) {
     StatTracer *lratchecker = new LratChecker (this);
+    DeferDeletePtr<LratChecker> delete_lratchecker (
+        (LratChecker *) lratchecker);
     LOG ("PROOF connecting LRAT proof checker");
     force_lrat ();
+    frat = true;
+    resize_unit_clauses_idx ();
     proof->connect (lratchecker);
     stat_tracers.push_back (lratchecker);
+    delete_lratchecker.release ();
   }
   if (opts.checkproof == 1 || opts.checkproof == 3) {
     StatTracer *checker = new Checker (this);
+    DeferDeletePtr<Checker> delete_checker ((Checker *) checker);
     LOG ("PROOF connecting proof checker");
     proof->connect (checker);
     stat_tracers.push_back (checker);
+    delete_checker.release ();
   }
 }
 
@@ -176,9 +195,7 @@ void Internal::flush_trace (bool print) {
 
 /*------------------------------------------------------------------------*/
 
-Proof::Proof (Internal *s) : internal (s), lratbuilder (0) {
-  LOG ("PROOF new");
-}
+Proof::Proof (Internal *s) : internal (s) { LOG ("PROOF new"); }
 
 Proof::~Proof () { LOG ("PROOF delete"); }
 
@@ -201,8 +218,7 @@ inline void Proof::add_literals (const vector<int> &c) {
 
 /*------------------------------------------------------------------------*/
 
-void Proof::add_original_clause (uint64_t id, bool r,
-                                 const vector<int> &c) {
+void Proof::add_original_clause (int64_t id, bool r, const vector<int> &c) {
   LOG (c, "PROOF adding original internal clause");
   add_literals (c);
   clause_id = id;
@@ -210,7 +226,7 @@ void Proof::add_original_clause (uint64_t id, bool r,
   add_original_clause ();
 }
 
-void Proof::add_external_original_clause (uint64_t id, bool r,
+void Proof::add_external_original_clause (int64_t id, bool r,
                                           const vector<int> &c,
                                           bool restore) {
   // literals of c are already external
@@ -222,7 +238,7 @@ void Proof::add_external_original_clause (uint64_t id, bool r,
   add_original_clause (restore);
 }
 
-void Proof::delete_external_original_clause (uint64_t id, bool r,
+void Proof::delete_external_original_clause (int64_t id, bool r,
                                              const vector<int> &c) {
   // literals of c are already external
   assert (clause.empty ());
@@ -233,8 +249,8 @@ void Proof::delete_external_original_clause (uint64_t id, bool r,
   delete_clause ();
 }
 
-void Proof::add_derived_empty_clause (uint64_t id,
-                                      const vector<uint64_t> &chain) {
+void Proof::add_derived_empty_clause (int64_t id,
+                                      const vector<int64_t> &chain) {
   LOG ("PROOF adding empty clause");
   assert (clause.empty ());
   assert (proof_chain.empty ());
@@ -245,8 +261,8 @@ void Proof::add_derived_empty_clause (uint64_t id,
   add_derived_clause ();
 }
 
-void Proof::add_derived_unit_clause (uint64_t id, int internal_unit,
-                                     const vector<uint64_t> &chain) {
+void Proof::add_derived_unit_clause (int64_t id, int internal_unit,
+                                     const vector<int64_t> &chain) {
   LOG ("PROOF adding unit clause %d", internal_unit);
   assert (proof_chain.empty ());
   assert (clause.empty ());
@@ -260,7 +276,7 @@ void Proof::add_derived_unit_clause (uint64_t id, int internal_unit,
 
 /*------------------------------------------------------------------------*/
 
-void Proof::add_derived_clause (Clause *c, const vector<uint64_t> &chain) {
+void Proof::add_derived_clause (Clause *c, const vector<int64_t> &chain) {
   LOG (c, "PROOF adding to proof derived");
   assert (clause.empty ());
   assert (proof_chain.empty ());
@@ -272,8 +288,8 @@ void Proof::add_derived_clause (Clause *c, const vector<uint64_t> &chain) {
   add_derived_clause ();
 }
 
-void Proof::add_derived_clause (uint64_t id, bool r, const vector<int> &c,
-                                const vector<uint64_t> &chain) {
+void Proof::add_derived_clause (int64_t id, bool r, const vector<int> &c,
+                                const vector<int64_t> &chain) {
   LOG (c, "PROOF adding derived clause");
   assert (clause.empty ());
   assert (proof_chain.empty ());
@@ -286,8 +302,8 @@ void Proof::add_derived_clause (uint64_t id, bool r, const vector<int> &c,
   add_derived_clause ();
 }
 
-void Proof::add_assumption_clause (uint64_t id, const vector<int> &c,
-                                   const vector<uint64_t> &chain) {
+void Proof::add_assumption_clause (int64_t id, const vector<int> &c,
+                                   const vector<int64_t> &chain) {
   // literals of c are already external
   assert (clause.empty ());
   assert (proof_chain.empty ());
@@ -316,8 +332,8 @@ void Proof::add_constraint (const vector<int> &c) {
   add_constraint ();
 }
 
-void Proof::add_assumption_clause (uint64_t id, int lit,
-                                   const vector<uint64_t> &chain) {
+void Proof::add_assumption_clause (int64_t id, int lit,
+                                   const vector<int64_t> &chain) {
   assert (clause.empty ());
   assert (proof_chain.empty ());
   clause.push_back (lit);
@@ -329,14 +345,14 @@ void Proof::add_assumption_clause (uint64_t id, int lit,
 
 void Proof::delete_clause (Clause *c) {
   LOG (c, "PROOF deleting from proof");
-  assert (clause.empty ());
+  clause.clear (); // Can be non-empty if an allocation fails during adding.
   add_literals (c);
   clause_id = c->id;
   redundant = c->redundant;
   delete_clause (); // Increments 'statistics.deleted'.
 }
 
-void Proof::delete_clause (uint64_t id, bool r, const vector<int> &c) {
+void Proof::delete_clause (int64_t id, bool r, const vector<int> &c) {
   LOG (c, "PROOF deleting from proof");
   assert (clause.empty ());
   add_literals (c);
@@ -353,7 +369,7 @@ void Proof::weaken_minus (Clause *c) {
   weaken_minus ();
 }
 
-void Proof::weaken_minus (uint64_t id, const vector<int> &c) {
+void Proof::weaken_minus (int64_t id, const vector<int> &c) {
   LOG (c, "PROOF deleting from proof");
   assert (clause.empty ());
   add_literals (c);
@@ -366,12 +382,12 @@ void Proof::weaken_plus (Clause *c) {
   delete_clause (c); // Increments 'statistics.deleted'.
 }
 
-void Proof::weaken_plus (uint64_t id, const vector<int> &c) {
+void Proof::weaken_plus (int64_t id, const vector<int> &c) {
   weaken_minus (id, c);
   delete_clause (id, false, c); // Increments 'statistics.deleted'.
 }
 
-void Proof::delete_unit_clause (uint64_t id, const int lit) {
+void Proof::delete_unit_clause (int64_t id, const int lit) {
   LOG ("PROOF deleting unit from proof %d", lit);
   assert (clause.empty ());
   add_literal (lit);
@@ -388,7 +404,7 @@ void Proof::finalize_clause (Clause *c) {
   finalize_clause ();
 }
 
-void Proof::finalize_clause (uint64_t id, const vector<int> &c) {
+void Proof::finalize_clause (int64_t id, const vector<int> &c) {
   LOG (c, "PROOF finalizing clause");
   assert (clause.empty ());
   for (const auto &lit : c)
@@ -397,7 +413,7 @@ void Proof::finalize_clause (uint64_t id, const vector<int> &c) {
   finalize_clause ();
 }
 
-void Proof::finalize_unit (uint64_t id, int lit) {
+void Proof::finalize_unit (int64_t id, int lit) {
   LOG ("PROOF finalizing clause %d", lit);
   assert (clause.empty ());
   add_literal (lit);
@@ -405,7 +421,7 @@ void Proof::finalize_unit (uint64_t id, int lit) {
   finalize_clause ();
 }
 
-void Proof::finalize_external_unit (uint64_t id, int lit) {
+void Proof::finalize_external_unit (int64_t id, int lit) {
   LOG ("PROOF finalizing clause %d", lit);
   assert (clause.empty ());
   clause.push_back (lit);
@@ -422,13 +438,14 @@ void Proof::finalize_external_unit (uint64_t id, int lit) {
 void Proof::flush_clause (Clause *c) {
   LOG (c, "PROOF flushing falsified literals in");
   assert (clause.empty ());
+  const bool antecedents = (internal->lrat || internal->frat);
   for (int i = 0; i < c->size; i++) {
     int internal_lit = c->literals[i];
     if (internal->fixed (internal_lit) < 0) {
-      const unsigned uidx = internal->vlit (-internal_lit);
-      uint64_t id = internal->unit_clauses[uidx];
-      assert (id);
-      proof_chain.push_back (id);
+      if (antecedents) {
+        int64_t id = internal->unit_id (-internal_lit);
+        proof_chain.push_back (id);
+      }
       continue;
     }
     add_literal (internal_lit);
@@ -449,7 +466,7 @@ void Proof::flush_clause (Clause *c) {
 // 'add' and 'remove' operations.
 
 void Proof::strengthen_clause (Clause *c, int remove,
-                               const vector<uint64_t> &chain) {
+                               const vector<int64_t> &chain) {
   LOG (c, "PROOF strengthen by removing %d in", remove);
   assert (clause.empty ());
   for (int i = 0; i < c->size; i++) {
@@ -469,7 +486,7 @@ void Proof::strengthen_clause (Clause *c, int remove,
 }
 
 void Proof::otfs_strengthen_clause (Clause *c, const std::vector<int> &old,
-                                    const vector<uint64_t> &chain) {
+                                    const vector<int64_t> &chain) {
   LOG (c, "PROOF otfs strengthen");
   assert (clause.empty ());
   for (int i = 0; i < c->size; i++) {
@@ -486,7 +503,7 @@ void Proof::otfs_strengthen_clause (Clause *c, const std::vector<int> &old,
   c->id = id;
 }
 
-void Proof::strengthen (uint64_t id) {
+void Proof::strengthen (int64_t id) {
   clause_id = id;
   strengthen ();
 }
@@ -497,8 +514,6 @@ void Proof::add_original_clause (bool restore) {
   LOG (clause, "PROOF adding original external clause");
   assert (clause_id);
 
-  if (lratbuilder)
-    lratbuilder->add_original_clause (clause_id, clause);
   for (auto &tracer : tracers) {
     tracer->add_original_clause (clause_id, false, clause, restore);
   }
@@ -510,9 +525,6 @@ void Proof::add_derived_clause () {
   LOG (clause, "PROOF adding derived external clause (redundant: %d)",
        redundant);
   assert (clause_id);
-  if (lratbuilder) {
-    proof_chain = lratbuilder->add_clause_get_proof (clause_id, clause);
-  }
   for (auto &tracer : tracers) {
     tracer->add_derived_clause (clause_id, redundant, clause, proof_chain);
   }
@@ -523,10 +535,18 @@ void Proof::add_derived_clause () {
 
 void Proof::delete_clause () {
   LOG (clause, "PROOF deleting external clause");
-  if (lratbuilder)
-    lratbuilder->delete_clause (clause_id, clause);
   for (auto &tracer : tracers) {
     tracer->delete_clause (clause_id, redundant, clause);
+  }
+  clause.clear ();
+  clause_id = 0;
+}
+
+void Proof::demote_clause () {
+  LOG (clause, "PROOF demoting external clause");
+  assert (!redundant);
+  for (auto &tracer : tracers) {
+    tracer->demote_clause (clause_id, clause);
   }
   clause.clear ();
   clause_id = 0;
@@ -559,10 +579,6 @@ void Proof::finalize_clause () {
 
 void Proof::add_assumption_clause () {
   LOG (clause, "PROOF adding assumption clause");
-  if (lratbuilder) {
-    proof_chain = lratbuilder->add_clause_get_proof (clause_id, clause);
-    lratbuilder->delete_clause (clause_id, clause);
-  }
   for (auto &tracer : tracers) {
     tracer->add_assumption_clause (clause_id, clause, proof_chain);
   }
@@ -595,14 +611,14 @@ void Proof::reset_assumptions () {
   }
 }
 
-void Proof::report_status (int status, uint64_t id) {
+void Proof::report_status (int status, int64_t id) {
   LOG ("PROOF reporting status %d", status);
   for (auto &tracer : tracers) {
     tracer->report_status (status, id);
   }
 }
 
-void Proof::begin_proof (uint64_t id) {
+void Proof::begin_proof (int64_t id) {
   LOG (clause, "PROOF begin proof");
   for (auto &tracer : tracers) {
     tracer->begin_proof (id);
@@ -617,7 +633,7 @@ void Proof::solve_query () {
 }
 
 void Proof::conclude_unsat (ConclusionType con,
-                            const vector<uint64_t> &conclusion) {
+                            const vector<int64_t> &conclusion) {
   LOG (clause, "PROOF conclude unsat");
   for (auto &tracer : tracers) {
     tracer->conclude_unsat (con, conclusion);
@@ -628,6 +644,13 @@ void Proof::conclude_sat (const vector<int> &model) {
   LOG (clause, "PROOF conclude sat");
   for (auto &tracer : tracers) {
     tracer->conclude_sat (model);
+  }
+}
+
+void Proof::conclude_unknown (const vector<int> &trail) {
+  LOG (clause, "PROOF conclude unknown");
+  for (auto &tracer : tracers) {
+    tracer->conclude_unknown (trail);
   }
 }
 

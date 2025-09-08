@@ -68,12 +68,21 @@ int inline Internal::shrink_literal (int lit, int blevel,
   assert (val (lit) < 0);
 
   Flags &f = flags (lit);
-  const Var &v = var (lit);
+  Var &v = var (lit);
   assert (v.level <= blevel);
 
   if (!v.level) {
     LOG ("skipping root level assigned %d", (lit));
     return 0;
+  }
+
+  if (v.reason == external_reason) {
+    assert (!opts.exteagerreasons);
+    v.reason = learn_external_reason_clause (-lit, 0, true);
+    if (!v.reason) {
+      assert (!v.level);
+      return 0;
+    }
   }
   assert (v.reason != external_reason);
   if (f.shrinkable) {
@@ -232,6 +241,9 @@ unsigned inline Internal::shrink_along_reason (int uip, int blevel,
   assert (f.shrinkable);
   assert (v.level == blevel);
   assert (v.reason);
+
+  if (opts.minimizeticks)
+    stats.ticks.search[stable]++;
 
   if (resolve_large_clauses || v.reason->size == 2) {
     const Clause &c = *v.reason;

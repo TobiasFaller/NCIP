@@ -1,0 +1,50 @@
+#include <cstdio>
+#include <cstdlib>
+#include <filesystem>
+#include <format>
+#include <errno.h>
+#include <unistd.h>
+
+int main(int argc, char** argv) {
+    if (argc != 4) {
+        std::printf("Usage: %s <benchmark> <certificate.sat> <certificate.unsat>", argv[0]);
+        return 1;
+    }
+
+    try {
+        std::filesystem::path proc_path { "/proc/self/exe" };
+        std::filesystem::path exe_path { std::filesystem::read_symlink(proc_path) };
+        std::filesystem::path dir_path { exe_path.parent_path() };
+
+        int stdout_fd = ::dup(1);
+        if (stdout_fd < 0) {
+            ::fprintf(stderr, "Couldn't copy stdout\n");
+            ::exit(1);
+        }
+        FILE* stdout_copy = ::fdopen(stdout_fd,  "w");
+        if (!stdout_copy) {
+            ::fprintf(stderr, "Couldn't open stdout\n");
+            ::exit(1);
+        }
+        ::fclose(::stdout);
+
+        auto command = std::format("{}/ncip-@NCIP_EXECUTABLE@ --format=@NCIP_FORMAT@ --export-model={} --export-certificate={} --log=none {}",
+            dir_path.c_str(), argv[2], argv[3], argv[1]);
+        int result = WEXITSTATUS(::system(command.c_str()));
+        if (result == 10) {
+            ::fprintf(stdout_copy, "sat\n");
+        } else if (result == 20) {
+            ::fprintf(stdout_copy, "unsat\n");
+        } else if (result == 30) {
+            ::fprintf(stdout_copy, "limit\n");
+        } else if (result == 40) {
+            ::fprintf(stdout_copy, "interrupted\n");
+        } else {
+            ::fprintf(stdout_copy, "unknown\n");
+        }
+        return result;
+    } catch (std::filesystem::filesystem_error& error) {
+        ::fprintf(stderr, "Couldn't get directory\n");
+        ::exit(1);
+    }
+}

@@ -10,13 +10,13 @@
 #include <iostream>
 #include <type_traits>
 
-#ifdef INCLUDE_PREFIXED
+#if __has_include(<cadical/cadical.hpp>)
 #include <cadical/cadical.hpp>
 #include <cadicraig/craigtracer.hpp>
-#else /* INCLUDE_PREFIXED */
+#else
 #include <cadical.hpp>
 #include <craigtracer.hpp>
-#endif /* INCLUDE_PREFIXED */
+#endif
 
 namespace Ncip {
 namespace Backend {
@@ -57,8 +57,19 @@ public:
 
 	CadiCraigSolverInterface(): nextVar(1), nextClause(1), interrupted(false), craigTracer(nullptr) {
 		this->connect_terminator(this);
+		this->set("quiet", 1);
+		this->set("factor", 0); // BVA breaks Craig interpolation
 
-		if constexpr (is_craig) {
+		if constexpr (is_preprocessor) {
+			this->set("decompose", 0); // decompose is very expensive
+			this->set("congruence", 0); // congruence is very expensive
+		} else if constexpr (is_fpc)  {
+			; // Nothing
+		} else if constexpr (is_craig) {
+			this->set("probe", 0); // probe increases Craig size
+			this->set("ternary", 0); // ternary increases Craig size
+			this->set("minimize", 0); // minimize slightly increases complexity
+
 			craigTracer = new CaDiCraig::CraigTracer();
 			this->connect_proof_tracer(craigTracer, true);
 		}
@@ -67,7 +78,11 @@ public:
 	virtual ~CadiCraigSolverInterface() {
 		this->disconnect_terminator();
 
-		if constexpr (is_craig) {
+		if constexpr (is_preprocessor) {
+			; // Nothing
+		} else if constexpr (is_fpc)  {
+			; // Nothing
+		} else if constexpr (is_craig) {
 			this->disconnect_proof_tracer(craigTracer);
 			delete craigTracer;
 		}
@@ -370,12 +385,17 @@ public:
 
 	template<typename Func1, typename Func2, bool Enable = is_preprocessor>
 	std::enable_if_t<Enable, BmcClauses> PreprocessClauses(const BmcClauses& clauses, const std::vector<bool>& globalVars, const BmcLiteral& root, const PreprocessLevel& level, Func1 createSolverVariable, Func2 createBmcVariable, bool trace=false) {
-		if (level >= PreprocessLevel::Expensive) {
-			this->set("block", 1);
-			this->set("condition", 1);
-			this->set("cover", 1);
-			this->set("vivifyonce", 1);
+		int rounds = 0;
+		if (level >= PreprocessLevel::Simple) {
+			rounds = 1;
+			this->optimize(1);
+		} else if (level >= PreprocessLevel::Expensive) {
+			rounds = 3;
+			this->optimize(2);
 		}
+
+		UnitCounter unitCounter;
+		this->connect_fixed_listener(&unitCounter);
 
 		std::vector<int> preClause;
 		for (auto const& clause : clauses) {
@@ -419,7 +439,8 @@ public:
 		}
 
 		if (trace) { std::cerr << "  - Preprocessing" << std::endl; }
-		auto code { this->simplify((level >= PreprocessLevel::Expensive) ? 3 : 1) };
+		auto code { this->simplify(rounds) };
+		this->disconnect_fixed_listener();
 		bool result { code != 20 };
 		if (!result) {
 			if (trace) { std::cerr << "    Result Constant 0" << std::endl; }
@@ -428,17 +449,34 @@ public:
 
 		if (trace) { std::cerr << "  - Extracting resulting clauses" << std::endl; }
 		BmcClauses resultClauses;
-		resultClauses.reserve(this->irredundant());
+		resultClauses.reserve(this->irredundant() + unitCounter.getNumUnits());
 
 		ClauseAdder<Func2> clauseAdder { *this, resultClauses, createBmcVariable, trace };
 		this->traverse_clauses(clauseAdder);
-		this->traverse_witnesses_backward(clauseAdder);
 		return resultClauses;
 	}
 
 private:
+	class UnitCounter: public CaDiCaL::FixedAssignmentListener {
+	private:
+		size_t units;
+
+	public:
+		UnitCounter(void):
+			units(0u)
+		{}
+
+		void notify_fixed_assignment(int unit) override {
+			units++;
+		}
+
+		size_t getNumUnits(void) {
+			return units;
+		}
+	};
+
 	template<typename Func>
-	class ClauseAdder: public CaDiCaL::ClauseIterator, public CaDiCaL::WitnessIterator {
+	class ClauseAdder: public CaDiCaL::ClauseIterator {
 	private:
 		SolverVariableMap<ImplTag, SolverTag>& base;
 		BmcClauses& target;
@@ -454,26 +492,6 @@ private:
 		{}
 
 		bool clause(const std::vector<int>& clause) override {
-			auto& resultClause = target.emplace_back();
-			resultClause.reserve(clause.size());
-			for (auto& lit : clause) {
-				resultClause.push_back(base.MapLiteralBackward(lit, createBmcVariable));
-			}
-
-			if (trace) {
-				std::cerr << "    Result Clause " << to_string(resultClause, 0u);
-				std::cerr << " <=> Mapped (";
-				size_t index { 0u };
-				for (auto const& lit : clause) {
-					if (index++ != 0) { std::cerr << ", "; }
-					std::cerr << std::to_string(lit);
-				}
-				std::cerr << ")" << std::endl;
-			}
-
-			return true;
-		}
-		bool witness(const std::vector<int> &clause, const std::vector<int> &witness, uint64_t id) override {
 			auto& resultClause = target.emplace_back();
 			resultClause.reserve(clause.size());
 			for (auto& lit : clause) {

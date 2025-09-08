@@ -54,6 +54,7 @@ public:
 	const std::vector<AigEdge>& GetOutputs() const { return outputs; }
 	const std::vector<AigEdge>& GetBads() const { return bads; }
 	const std::vector<AigEdge>& GetConstraints() const { return constraints; }
+	const std::vector<std::string>& GetComments() const { return comments; }
 
 private:
 	friend class AigProblemBuilder;
@@ -66,7 +67,8 @@ private:
 		std::vector<AigEdge> ands,
 		std::vector<AigEdge> outputs,
 		std::vector<AigEdge> bads,
-		std::vector<AigEdge> constraints
+		std::vector<AigEdge> constraints,
+		std::vector<std::string> comments
 	);
 
 	std::vector<AigNode> nodes;
@@ -76,6 +78,7 @@ private:
 	std::vector<AigEdge> outputs;
 	std::vector<AigEdge> bads;
 	std::vector<AigEdge> constraints;
+	std::vector<std::string> comments;
 
 };
 class AigProblemBuilder {
@@ -97,8 +100,9 @@ public:
 	void AddOutput(AigEdge edge);
 	void AddBad(AigEdge edge);
 	void AddConstraint(AigEdge edge);
+	void AddComment(std::string comment);
 	void Check() const;
-	std::tuple<AigProblem, BmcProblem> Build();
+	std::tuple<AigProblem, BmcProblem> Build(bool encodeOutputs = false);
 	void Clear();
 
 	ssize_t GetInputCount() const { return inputs.size(); }
@@ -114,6 +118,7 @@ public:
 	const std::vector<AigEdge>& GetOutputs() const { return outputs; }
 	const std::vector<AigEdge>& GetBads() const { return bads; }
 	const std::vector<AigEdge>& GetConstraints() const { return constraints; }
+	const std::vector<std::string>& GetComments() const { return comments; }
 
 protected:
 	std::vector<AigNode> nodes;
@@ -123,6 +128,7 @@ protected:
 	std::vector<AigEdge> outputs;
 	std::vector<AigEdge> bads;
 	std::vector<AigEdge> constraints;
+	std::vector<std::string> comments;
 
 };
 

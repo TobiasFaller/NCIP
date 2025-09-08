@@ -74,13 +74,21 @@ void Internal::update_target_and_best () {
 /*------------------------------------------------------------------------*/
 
 void Internal::backtrack (int new_level) {
+  assert (new_level <= level);
+  if (new_level == level)
+    return;
+
+  update_target_and_best ();
+  backtrack_without_updating_phases (new_level);
+}
+
+void Internal::backtrack_without_updating_phases (int new_level) {
 
   assert (new_level <= level);
   if (new_level == level)
     return;
 
   stats.backtracks++;
-  update_target_and_best ();
 
   assert (num_assigned == trail.size ());
 
@@ -98,7 +106,8 @@ void Internal::backtrack (int new_level) {
   int reassigned = 0;
 
   notify_backtrack (new_level);
-  if (external_prop && !external_prop_is_lazy && notified > assigned) {
+  if (external_prop && !external_prop_is_lazy && !private_steps &&
+      notified > assigned) {
     LOG ("external propagator is notified about some unassignments (trail: "
          "%zd, notified: %zd).",
          trail.size (), notified);

@@ -17,6 +17,8 @@ option(NCIP_BACKEND_CADICRAIG_DEBUG "Build NCIP with CaDiCraig Debug backend."  
 option(NCIP_BACKEND_KITTENCRAIG     "Build NCIP with KittenCraig backend."                     ON )
 option(NCIP_BACKEND_PORTFOLIO       "Build NCIP with parallel portfolio approach."             ON )
 
+set(NCIP_WRAPPER_VERSION   "HWMCC25" CACHE STRING "Version of NCIP wrapper for the HWMCC."        )
+
 #--------------------------------------------------------------------------------------------------
 # Library version:
 
@@ -34,7 +36,7 @@ set(NCIP_SOVERSION ${NCIP_SOMAJOR})
 #--------------------------------------------------------------------------------------------------
 # Compile flags:
 
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
@@ -50,9 +52,12 @@ add_subdirectory(deps/cadicraig)
 add_subdirectory(deps/kittencraig)
 add_subdirectory(deps/minicraig)
 
-set(NCIP_LIB_SOURCES src/bmc-ncip.cpp src/bmc-problem.cpp src/bmc-format-aig.cpp src/bmc-format-cip.cpp src/bmc-format-dimspec.cpp)
-set(NCIP_LIB_HEADERS src/bmc-ncip.hpp src/bmc-problem.hpp src/bmc-format-aig.hpp src/bmc-format-cip.hpp src/bmc-format-dimspec.hpp
-  src/bmc-ncip-portfolio.hpp)
+set(NCIP_LIB_SOURCES src/bmc-ncip.cpp src/bmc-problem.cpp
+  src/bmc-format-aig.cpp src/bmc-format-cip.cpp src/bmc-format-dimspec.cpp
+  src/bmc-io-aig.cpp src/bmc-io-cip.cpp src/bmc-io-dimspec.cpp)
+set(NCIP_LIB_HEADERS src/bmc-ncip.hpp src/bmc-problem.hpp src/bmc-ncip-portfolio.hpp
+  src/bmc-format-aig.hpp src/bmc-format-cip.hpp src/bmc-format-dimspec.hpp
+  src/bmc-io-aig.hpp src/bmc-io-cip.hpp src/bmc-io-dimspec.hpp)
 add_library(ncip-lib-static STATIC ${NCIP_LIB_SOURCES})
 add_library(ncip-lib-shared SHARED ${NCIP_LIB_SOURCES})
 target_include_directories(ncip-lib-static PUBLIC src)
@@ -89,7 +94,9 @@ endif(STATIC_BINARIES)
 function(create_alias executable format)
   set(NCIP_EXECUTABLE ${executable})
   set(NCIP_FORMAT ${format})
-  configure_file(util/wrapper-competition.in
+
+if(NCIP_WRAPPER_VERSION STREQUAL HWMCC24)
+  configure_file(util/wrapper-hwmcc24.in
     ncip-${executable}-${format}
     FILE_PERMISSIONS
       OWNER_READ OWNER_WRITE OWNER_EXECUTE
@@ -98,6 +105,16 @@ function(create_alias executable format)
     @ONLY)
   install(PROGRAMS ${CMAKE_CURRENT_BINARY_DIR}/ncip-${executable}-${format}
     TYPE BIN)
+elseif(NCIP_WRAPPER_VERSION STREQUAL HWMCC25)
+  configure_file(util/wrapper-hwmcc25.in
+    ncip-${executable}-${format}.cpp
+    @ONLY)
+  add_executable(ncip-${executable}-${format}
+    ${CMAKE_CURRENT_BINARY_DIR}/ncip-${executable}-${format}.cpp)
+  set_target_properties(ncip-${executable}-${format} PROPERTIES OUTPUT_NAME "ncip-${executable}-${format}")
+  install(TARGETS ncip-${executable}-${format})
+endif()
+
   unset(NCIP_EXECUTABLE)
   unset(NCIP_FORMAT)
 endfunction(create_alias)

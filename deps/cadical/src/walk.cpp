@@ -342,7 +342,7 @@ void Internal::walk_flip_lit (Walker &walker, int lit) {
 #endif
     Watches &ws = watches (-lit);
 
-    LOG ("trying to brake %zd watched clauses", ws.size ());
+    LOG ("trying to break %zd watched clauses", ws.size ());
 
     for (const auto &w : ws) {
       Clause *d = w.clause;
@@ -398,7 +398,7 @@ inline void Internal::walk_save_minimum (Walker &walker) {
   for (auto i : vars) {
     const signed char tmp = vals[i];
     if (tmp)
-      phases.min[i] = phases.saved[i] = tmp;
+      phases.saved[i] = tmp;
   }
 }
 
@@ -494,6 +494,7 @@ int Internal::walk_round (int64_t limit, bool prev) {
 
   if (!failed) {
 
+    const bool target = (stable || opts.target == 2);
     for (auto idx : vars) {
       if (!active (idx)) {
         LOG ("skipping inactive variable %d", idx);
@@ -508,7 +509,7 @@ int Internal::walk_round (int64_t limit, bool prev) {
       if (prev)
         tmp = phases.prev[idx];
       if (!tmp)
-        tmp = sign (decide_phase (idx, true));
+        tmp = sign (decide_phase (idx, target));
       assert (tmp == 1 || tmp == -1);
       set_val (idx, tmp);
       assert (level == 2);
@@ -634,12 +635,21 @@ int Internal::walk_round (int64_t limit, bool prev) {
              "%" PRId64 " propagations",
              minimum, flips, walker.propagations);
 
-    PHASE ("walk", stats.walk.count, "%.2f million propagations per second",
-           relative (1e-6 * walker.propagations,
-                     time () - profiles.walk.started));
+    if (opts.profile >= 2) {
+      PHASE ("walk", stats.walk.count,
+             "%.2f million propagations per second",
+             relative (1e-6 * walker.propagations,
+                       time () - profiles.walk.started));
 
-    PHASE ("walk", stats.walk.count, "%.2f thousand flips per second",
-           relative (1e-3 * flips, time () - profiles.walk.started));
+      PHASE ("walk", stats.walk.count, "%.2f thousand flips per second",
+             relative (1e-3 * flips, time () - profiles.walk.started));
+
+    } else {
+      PHASE ("walk", stats.walk.count, "%.2f million propagations",
+             1e-6 * walker.propagations);
+
+      PHASE ("walk", stats.walk.count, "%.2f thousand flips", 1e-3 * flips);
+    }
 
     if (minimum > 0) {
       LOG ("minimum %" PRId64 " non-zero thus potentially continue",
@@ -683,7 +693,7 @@ int Internal::walk_round (int64_t limit, bool prev) {
 void Internal::walk () {
   START_INNER_WALK ();
   int64_t limit = stats.propagations.search;
-  limit *= 1e-3 * opts.walkreleff;
+  limit *= 1e-3 * opts.walkeffort;
   if (limit < opts.walkmineff)
     limit = opts.walkmineff;
   if (limit > opts.walkmaxeff)

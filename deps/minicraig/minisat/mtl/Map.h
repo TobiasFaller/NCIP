@@ -84,6 +84,11 @@ class Map {
         for (int i = 1; newsize <= cap && i < nprimes; i++)
            newsize = primes[i];
 
+        // Workaround for bad GCC heuristic not recognizing the loop
+        // only resulting in positive values.
+        if (newsize < 0)
+            __builtin_unreachable();
+
         table = new vec<Pair>[newsize];
         cap   = newsize;
 

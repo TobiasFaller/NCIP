@@ -116,12 +116,14 @@ void DimspecProblemBuilder::Check() const {
 
 std::tuple<DimspecProblem, BmcProblem> DimspecProblemBuilder::Build() {
 	Check();
+	BmcClauses bmcInitClauses { initClauses };
+	BmcClauses bmcTransClauses { transClauses };
+	BmcClauses bmcTargetClauses { goalClauses };
+	std::copy(universalClauses.begin(), universalClauses.end(), std::back_inserter(bmcInitClauses));
+	std::copy(universalClauses.begin(), universalClauses.end(), std::back_inserter(bmcTransClauses));
+	std::copy(universalClauses.begin(), universalClauses.end(), std::back_inserter(bmcTargetClauses));
 	DimspecProblem dimspecProblem { variables, initClauses, transClauses, goalClauses, universalClauses };
-	std::copy(universalClauses.begin(), universalClauses.end(), std::back_inserter(initClauses));
-	std::copy(universalClauses.begin(), universalClauses.end(), std::back_inserter(transClauses));
-	std::copy(universalClauses.begin(), universalClauses.end(), std::back_inserter(goalClauses));
-	BmcProblem bmcProblem { variables, std::move(initClauses), std::move(transClauses), std::move(goalClauses) };
-	Clear();
+	BmcProblem bmcProblem { variables, bmcInitClauses, bmcTransClauses, bmcTargetClauses };
 	return { dimspecProblem, bmcProblem };
 }
 
